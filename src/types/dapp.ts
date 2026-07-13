@@ -83,6 +83,7 @@ export type SwapBuildResponse = {
   value: string;
   gas: string;
   quote: QuoteResponse;
+  approvalNeeded?: { token: string; spender: string };
 };
 
 export type ExecutionStatus = {

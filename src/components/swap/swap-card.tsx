@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useAccount, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
-import { parseUnits, formatUnits } from "viem";
+import { parseUnits, formatUnits, encodeFunctionData } from "viem";
 import { ArrowRight, Info, RefreshCw } from "lucide-react";
 import { LuxCard } from "@/components/ui/lux-card";
 import { TokenIcon } from "@/components/ui/token-icon";
@@ -76,20 +76,46 @@ export function SwapCard() {
   const outputToken =
     tokens.find((token) => token.address === swapOutputAddress) ?? tokens[1] ?? tokens[0];
 
+  // ── Enforce: one side must always be ETH/WETH ──
+  const isEthLike = (addr: string) =>
+    addr.toLowerCase() === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
+    addr.toLowerCase() === "0x0bd7d308f8e1639fab988df18a8011f41eacad73";
+
+  const inputIsEth = isEthLike(swapInputAddress);
+  const outputIsEth = isEthLike(swapOutputAddress);
+
+  // If user somehow picked non-ETH on BOTH sides, auto-fix the output to ETH
+  useEffect(() => {
+    if (!inputIsEth && !outputIsEth) {
+      setSwapPair(swapInputAddress, "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
+    }
+  }, [inputIsEth, outputIsEth, swapInputAddress, setSwapPair]);
+
+  // Filter tokens for each dropdown: the OTHER side must be ETH
+  const inputTokenOptions = tokenOptions; // user can pick anything on input side
+  const outputTokenOptions = useMemo(() => {
+    if (inputIsEth) {
+      // Input is ETH → output shows only non-ETH tokens
+      return tokenOptions.filter((t) => !isEthLike(t.address));
+    }
+    // Input is a token → output locked to ETH only
+    return tokenOptions.filter((t) => isEthLike(t.address));
+  }, [tokenOptions, inputIsEth]);
+
   const amountNumber = Number.parseFloat(swapAmount || "0");
   const quoteRequest =
     isConnected &&
-    inputToken &&
-    outputToken &&
-    amountNumber > 0 &&
-    inputToken.address !== outputToken.address
+      inputToken &&
+      outputToken &&
+      amountNumber > 0 &&
+      inputToken.address !== outputToken.address
       ? {
-          inputAddress: inputToken.address,
-          outputAddress: outputToken.address,
-          amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
-          slippageBps,
-          walletAddress: walletAddress!,
-        }
+        inputAddress: inputToken.address,
+        outputAddress: outputToken.address,
+        amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
+        slippageBps,
+        walletAddress: walletAddress!,
+      }
       : null;
 
   const { data: quote, isLoading: quoteLoading, refetch } = useQuote(quoteRequest);
@@ -97,14 +123,14 @@ export function SwapCard() {
   const receiveAmount =
     quote && outputToken
       ? formatAmount(
-          Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)),
-          6,
-        )
+        Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)),
+        6,
+      )
       : "0";
   const rate =
     quote && inputToken && outputToken && amountNumber > 0
       ? Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)) /
-        amountNumber
+      amountNumber
       : null;
 
   useEffect(() => {
@@ -186,17 +212,65 @@ export function SwapCard() {
         data?: string;
         value?: string;
         gas?: string;
+        approvalNeeded?: { token: string; spender: string };
       };
       if (!response.ok || !payload.to || !payload.data) {
         throw new Error(payload.error ?? "Unable to build swap.");
       }
 
-      await sendTransaction({
-        to: payload.to as `0x${string}`,
-        data: payload.data as `0x${string}`,
-        value: payload.value ? BigInt(payload.value) : undefined,
-        gas: payload.gas ? BigInt(payload.gas) : undefined,
-      });
+      // ── ERC-20 approval step (if needed) ──
+      if (payload.approvalNeeded) {
+        const approveData = encodeFunctionData({
+          abi: [
+            {
+              inputs: [
+                { name: "spender", type: "address" },
+                { name: "amount", type: "uint256" },
+              ],
+              name: "approve",
+              outputs: [{ name: "", type: "bool" }],
+              stateMutability: "nonpayable",
+              type: "function",
+            },
+          ] as const,
+          functionName: "approve",
+          args: [
+            payload.approvalNeeded.spender as `0x${string}`,
+            BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+          ],
+        });
+
+        await sendTransaction({
+          to: payload.approvalNeeded.token as `0x${string}`,
+          data: approveData,
+        });
+
+        // Re-fetch swap data after approval (allowance should now be sufficient)
+        const swapResponse = await fetch("/api/swap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(quoteRequest),
+        });
+        const swapPayload = (await swapResponse.json()) as typeof payload;
+        if (!swapResponse.ok || !swapPayload.to || !swapPayload.data) {
+          throw new Error(swapPayload.error ?? "Unable to build swap after approval.");
+        }
+
+        await sendTransaction({
+          to: swapPayload.to as `0x${string}`,
+          data: swapPayload.data as `0x${string}`,
+          value: swapPayload.value ? BigInt(swapPayload.value) : undefined,
+          gas: swapPayload.gas ? BigInt(swapPayload.gas) : undefined,
+        });
+      } else {
+        // No approval needed – execute swap directly
+        await sendTransaction({
+          to: payload.to as `0x${string}`,
+          data: payload.data as `0x${string}`,
+          value: payload.value ? BigInt(payload.value) : undefined,
+          gas: payload.gas ? BigInt(payload.gas) : undefined,
+        });
+      }
     } catch (submissionError) {
       setError(
         submissionError instanceof Error ? submissionError.message : "Swap submission failed.",
@@ -214,11 +288,18 @@ export function SwapCard() {
       <div className="grid gap-px bg-border/60 md:grid-cols-2">
         <TokenLeg
           label="You pay"
-          tokens={tokenOptions}
+          tokens={inputTokenOptions}
           token={inputToken}
           amount={swapAmount}
           onAmount={setSwapAmount}
-          onTokenChange={(address) => setSwapPair(address, swapOutputAddress)}
+          onTokenChange={(address) => {
+            // If user picks a non-ETH input, force output to ETH
+            if (!isEthLike(address)) {
+              setSwapPair(address, "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
+            } else {
+              setSwapPair(address, swapOutputAddress);
+            }
+          }}
           selectedAddress={swapInputAddress}
           excludeAddress={swapOutputAddress}
           max
@@ -228,10 +309,17 @@ export function SwapCard() {
         />
         <TokenLeg
           label="You receive"
-          tokens={tokenOptions}
+          tokens={outputTokenOptions}
           token={outputToken}
           amount={receiveAmount}
-          onTokenChange={(address) => setSwapPair(swapInputAddress, address)}
+          onTokenChange={(address) => {
+            // If user picks a non-ETH output, force input to ETH
+            if (!isEthLike(address)) {
+              setSwapPair("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", address);
+            } else {
+              setSwapPair(swapInputAddress, address);
+            }
+          }}
           selectedAddress={swapOutputAddress}
           excludeAddress={swapInputAddress}
           readOnly

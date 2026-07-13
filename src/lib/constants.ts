@@ -24,13 +24,48 @@ export const KNOWN_POOL_TO_TOKEN_ADDRESS: Record<string, string> = {
 };
 
 export const FEATURED_TOKENS = [
-  { address: ETH_ADDRESS, symbol: "ETH", name: "Ethereum", decimals: 18 },
-  { address: WETH_ADDRESS, symbol: "WETH", name: "Wrapped Ether", decimals: 18 },
-  { address: USDC_ADDRESS, symbol: "USDC", name: "USD Coin", decimals: 6 },
-  { address: ARROW_ADDRESS, symbol: "ARROW", name: "Arrow", decimals: 18 },
-  { address: CASHCAT_ADDRESS, symbol: "CASHCAT", name: "Cash Cat", decimals: 18 },
-  { address: HOODRAT_ADDRESS, symbol: "HOODRAT", name: "Hoodrat", decimals: 18 },
-  { address: JUGGERNAUT_ADDRESS, symbol: "JUGGERNAUT", name: "The Juggernaut", decimals: 18 },
+  {
+    address: ETH_ADDRESS,
+    symbol: "ETH",
+    name: "Ethereum",
+    decimals: 18,
+    dexVersion: "v3",
+    feeTier: 3000,
+  },
+  {
+    address: WETH_ADDRESS,
+    symbol: "WETH",
+    name: "Wrapped Ether",
+    decimals: 18,
+    dexVersion: "v3",
+    feeTier: 3000,
+  },
+  {
+    address: USDC_ADDRESS,
+    symbol: "USDC",
+    name: "USD Coin",
+    decimals: 6,
+    dexVersion: "v3",
+    feeTier: 3000,
+  },
+  { address: ARROW_ADDRESS, symbol: "ARROW", name: "Arrow", decimals: 18, dexVersion: "v2" },
+  {
+    address: CASHCAT_ADDRESS,
+    symbol: "CASHCAT",
+    name: "Cash Cat",
+    decimals: 18,
+    dexVersion: "v3",
+    feeTier: 10000,
+  },
+  { address: HOODRAT_ADDRESS, symbol: "HOODRAT", name: "Hoodrat", decimals: 18, dexVersion: "v2" },
+  {
+    address: JUGGERNAUT_ADDRESS,
+    symbol: "JUGGERNAUT",
+    name: "The Juggernaut",
+    decimals: 18,
+    dexVersion: "v3",
+    feeTier: 10000,
+  },
 ] as const;
 
 export function normalizeTokenAddress(address: string) {
@@ -45,7 +80,7 @@ export const ADDRESS_TO_SYMBOL = Object.fromEntries(
   FEATURED_TOKENS.map((token) => [token.address, token.symbol]),
 ) as Record<string, string>;
 
-// DEX contracts (placeholder - replace with actual Router/Quoter on Robinhood Chain)
-export const UNISWAP_V3_QUOTER_ADDRESS = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6";
-export const UNISWAP_V3_ROUTER_ADDRESS = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
+// DEX contracts – Uniswap on Robinhood Chain
+export const UNIVERSAL_ROUTER_ADDRESS = "0x8876789976dEcBfCbBbe364623C63652db8C0904";
+export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 export const UNISWAP_V3_FEE_TIER = 3000; // 0.3%

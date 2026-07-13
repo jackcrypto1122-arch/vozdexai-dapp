@@ -4,14 +4,18 @@ import {
   parseUnits,
   formatUnits,
   encodeFunctionData,
+  encodeAbiParameters,
+  encodePacked,
+  parseAbiParameters,
   type Chain,
+  type Hex,
 } from "viem";
 import {
   DEFAULT_RPC_URL,
   ETH_ADDRESS,
   USDC_ADDRESS,
   FEATURED_TOKENS,
-  UNISWAP_V3_ROUTER_ADDRESS,
+  UNIVERSAL_ROUTER_ADDRESS,
   UNISWAP_V3_FEE_TIER,
   ROBINHOOD_CHAIN_ID,
   WETH_ADDRESS,
@@ -43,28 +47,16 @@ function getPublicClient() {
   });
 }
 
-// Uniswap V3 Router ABI (minimal)
-const ROUTER_ABI = [
+// Universal Router ABI (minimal – execute only)
+const UNIVERSAL_ROUTER_ABI = [
   {
     inputs: [
-      {
-        components: [
-          { internalType: "address", name: "tokenIn", type: "address" },
-          { internalType: "address", name: "tokenOut", type: "address" },
-          { internalType: "uint24", name: "fee", type: "uint24" },
-          { internalType: "address", name: "recipient", type: "address" },
-          { internalType: "uint256", name: "deadline", type: "uint256" },
-          { internalType: "uint256", name: "amountIn", type: "uint256" },
-          { internalType: "uint256", name: "amountOutMinimum", type: "uint256" },
-          { internalType: "uint160", name: "sqrtPriceLimitX96", type: "uint160" },
-        ],
-        internalType: "struct ISwapRouter.ExactInputSingleParams",
-        name: "params",
-        type: "tuple",
-      },
+      { internalType: "bytes", name: "commands", type: "bytes" },
+      { internalType: "bytes[]", name: "inputs", type: "bytes[]" },
+      { internalType: "uint256", name: "deadline", type: "uint256" },
     ],
-    name: "exactInputSingle",
-    outputs: [{ internalType: "uint256", name: "amountOut", type: "uint256" }],
+    name: "execute",
+    outputs: [],
     stateMutability: "payable",
     type: "function",
   },
@@ -86,7 +78,35 @@ const ERC20_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [
+      { internalType: "address", name: "owner", type: "address" },
+      { internalType: "address", name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
+
+// ─── Universal Router command bytes ───
+const CMD_V4_SWAP = 0x10;
+const CMD_WRAP_ETH = 0x0b;
+const CMD_UNWRAP_WETH = 0x0c;
+
+// ─── V4 Actions ───
+const V4_SWAP_EXACT_IN_SINGLE = "0x07";
+const V4_SETTLE = "0x0b";
+const V4_TAKE = "0x0e";
+
+// ─── V4 ABIs ───
+// We do not use V4_EXACT_IN_ABI because Robinhood Chain Universal Router has an older/nonstandard
+// layout for Param 0 (with 4 extra hex words). We use dynamic hex string templating instead.
+
+const V4_SETTLE_ABI = parseAbiParameters("address currency, uint256 amount, bool payerIsUser");
+const V4_TAKE_ABI = parseAbiParameters("address currency, address recipient, uint256 amount");
+const V4_WRAPPER_ABI = parseAbiParameters("bytes actions, bytes[] params");
 
 export async function getQuote(request: QuoteRequest): Promise<QuoteResponse> {
   const inputMetadata = await resolveTokenMetadata(request.inputAddress);
@@ -164,32 +184,130 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
   const amountIn = BigInt(request.amountRaw);
   const slippageMultiplier = BigInt(10000 - request.slippageBps);
   const amountOutMinimum = (BigInt(quote.outAmountRaw) * slippageMultiplier) / 10000n;
+  const recipient = request.walletAddress as `0x${string}`;
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
+
+  const isNativeIn = tokenIn.toLowerCase() === ETH_ADDRESS.toLowerCase();
+  const isNativeOut = tokenOut.toLowerCase() === ETH_ADDRESS.toLowerCase();
+
+  // Resolve actual on-chain addresses (native ETH → WETH for on-chain swap)
+  const actualTokenIn = isNativeIn ? (WETH_ADDRESS as `0x${string}`) : tokenIn;
+  const actualTokenOut = isNativeOut ? (WETH_ADDRESS as `0x${string}`) : tokenOut;
+
+  const tokenInInfo =
+    FEATURED_TOKENS.find((t) => t.address.toLowerCase() === tokenIn.toLowerCase()) ??
+    inputMetadata.token;
+  const tokenOutInfo =
+    FEATURED_TOKENS.find((t) => t.address.toLowerCase() === tokenOut.toLowerCase()) ??
+    outputMetadata.token;
+
+  // Find dex configuration for the non-ETH token (which dictates the pool we use)
+  const nonEthTokenInfo = isNativeIn ? tokenOutInfo : tokenInInfo;
+  const feeTier = (nonEthTokenInfo as any)?.feeTier || 2888;
+  const feeHex = feeTier.toString(16).padStart(64, "0");
+
+  const ROUTER_AS_RECIPIENT = "0x0000000000000000000000000000000000000002" as `0x${string}`;
+
+  let commands: Hex;
+  let inputs: Hex[];
+  let value = "0";
+
+  // We use the EXACT hex structure from the successful Robinhood Chain transaction.
+  const pad32 = (hexOrNum: string | bigint | number) => {
+    let raw = typeof hexOrNum === "string" ? hexOrNum.replace("0x", "") : hexOrNum.toString(16);
+    return raw.padStart(64, "0");
+  };
+
+  const encodeV4Payload = (isETHtoToken: boolean) => {
+    const userOrRouter = isETHtoToken ? recipient : ROUTER_AS_RECIPIENT;
+
+    // In our successful struct for Param 0:
+    const p0: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(WETH_ADDRESS)}00000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000001a0${pad32(amountIn)}${pad32(amountOutMinimum)}00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020${pad32(isNativeIn ? actualTokenOut : actualTokenIn)}${feeHex}0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000`;
+
+    const settleToken = isNativeIn ? WETH_ADDRESS : actualTokenIn;
+    const payerIsUserHex = isNativeIn ? "00" : "01";
+    const p1: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(settleToken)}0000000000000000000000000000000000000000000000000000000000000000${payerIsUserHex.padStart(64, "0")}`;
+
+    const takeToken = isNativeIn ? actualTokenOut : WETH_ADDRESS;
+    const takeRecipient = isNativeIn ? recipient : ROUTER_AS_RECIPIENT;
+    const p2: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(takeToken)}${pad32(takeRecipient)}0000000000000000000000000000000000000000000000000000000000000000`;
+
+    return encodeAbiParameters(V4_WRAPPER_ABI, [
+      `0x070b0e` as Hex,
+      [p0, p1, p2]
+    ]);
+  };
+
+  if (isNativeIn) {
+    // ETH → Token: WRAP_ETH (0x0b) + V4_SWAP (0x10)
+    commands = `0x0b10` as Hex;
+    value = amountIn.toString();
+
+    // WRAP_ETH
+    const wrapInput = encodeAbiParameters(parseAbiParameters("address, uint256"), [
+      ROUTER_AS_RECIPIENT,
+      amountIn,
+    ]);
+
+    const v4Payload = encodeV4Payload(true);
+
+    inputs = [wrapInput, v4Payload];
+  } else if (isNativeOut) {
+    // Token → ETH: V4_SWAP (0x10) + UNWRAP_WETH (0x0c)
+    commands = `0x100c` as Hex;
+
+    const v4Payload = encodeV4Payload(false);
+
+    // UNWRAP_WETH
+    const unwrapInput = encodeAbiParameters(parseAbiParameters("address, uint256"), [
+      recipient,
+      amountOutMinimum,
+    ]);
+
+    inputs = [v4Payload, unwrapInput];
+  } else {
+    // Token → Token: V4_SWAP (0x10)
+    commands = `0x10` as Hex;
+
+    const v4Payload = encodeV4Payload(false);
+
+    inputs = [v4Payload];
+  }
+
 
   const data = encodeFunctionData({
-    abi: ROUTER_ABI,
-    functionName: "exactInputSingle",
-    args: [
-      {
-        tokenIn,
-        tokenOut,
-        fee: UNISWAP_V3_FEE_TIER,
-        recipient: request.walletAddress as `0x${string}`,
-        deadline: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour
-        amountIn,
-        amountOutMinimum,
-        sqrtPriceLimitX96: 0n,
-      },
-    ],
+    abi: UNIVERSAL_ROUTER_ABI,
+    functionName: "execute",
+    args: [commands, inputs, deadline],
   });
 
-  const value = tokenIn.toLowerCase() === ETH_ADDRESS.toLowerCase() ? amountIn.toString() : "0";
+  // ── Check if ERC-20 approval to the Universal Router is needed ──
+  let approvalNeeded: { token: string; spender: string } | undefined;
+  if (!isNativeIn) {
+    try {
+      const publicClient = getPublicClient();
+      const allowance = await publicClient.readContract({
+        address: tokenIn,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [recipient, UNIVERSAL_ROUTER_ADDRESS as `0x${string}`],
+      });
+      if (allowance < amountIn) {
+        approvalNeeded = { token: tokenIn, spender: UNIVERSAL_ROUTER_ADDRESS };
+      }
+    } catch {
+      // If we can't check, assume approval is needed
+      approvalNeeded = { token: tokenIn, spender: UNIVERSAL_ROUTER_ADDRESS };
+    }
+  }
 
   return {
-    to: UNISWAP_V3_ROUTER_ADDRESS,
+    to: UNIVERSAL_ROUTER_ADDRESS,
     data,
     value,
-    gas: "200000",
+    gas: "300000",
     quote,
+    approvalNeeded,
   };
 }
 

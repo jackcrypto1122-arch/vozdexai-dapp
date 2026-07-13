@@ -40,7 +40,13 @@ export function ActivityCard() {
       }).format(new Date(item.createdAt)),
     }));
 
-    return [...fromExecutions, ...fromHistory].slice(0, 6);
+    // Deduplicate by hash – local executions take priority over on-chain history
+    const seen = new Set(fromExecutions.map((e) => e.id));
+    const deduped = [
+      ...fromExecutions,
+      ...fromHistory.filter((h) => !seen.has(h.id)),
+    ];
+    return deduped.slice(0, 6);
   }, [data, executions]);
 
   return (
