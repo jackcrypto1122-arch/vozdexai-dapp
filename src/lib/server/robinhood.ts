@@ -509,45 +509,43 @@ export async function getMarketRows(addresses: string[] = []): Promise<MarketRow
 
   const metadataByAddress = new Map(metadataEntries.map((entry) => [entry.address, entry.token]));
 
-  return uniqueRequested
-    .map((requestedAddress) => {
-      const dexAddress = toDexTokenAddress(requestedAddress).toLowerCase();
-      const pair = selectBestPairForToken(dexAddress, dexPairs);
-      const token = metadataByAddress.get(requestedAddress);
-      const fallbackToken =
-        pair?.baseToken.address.toLowerCase() === dexAddress ? pair.baseToken : pair?.quoteToken;
+  return uniqueRequested.map((requestedAddress) => {
+    const dexAddress = toDexTokenAddress(requestedAddress).toLowerCase();
+    const pair = selectBestPairForToken(dexAddress, dexPairs);
+    const token = metadataByAddress.get(requestedAddress);
+    const fallbackToken =
+      pair?.baseToken.address.toLowerCase() === dexAddress ? pair.baseToken : pair?.quoteToken;
 
-      return {
-        address: token?.address ?? requestedAddress,
-        symbol:
-          requestedAddress === ETH_ADDRESS.toLowerCase()
-            ? "ETH"
-            : (token?.symbol ??
-              fallbackToken?.symbol ??
-              `${requestedAddress.slice(0, 4)}…${requestedAddress.slice(-4)}`),
-        name:
-          requestedAddress === ETH_ADDRESS.toLowerCase()
-            ? "Ethereum"
-            : (token?.name ?? fallbackToken?.name ?? requestedAddress),
-        decimals:
-          token?.decimals ?? (requestedAddress === ETH_ADDRESS.toLowerCase() ? 18 : undefined),
-        logoUri: pair?.info?.imageUrl,
-        priceUsd:
-          pair?.pairAddress
-            ? pairTokenUsdPrice(pair, dexAddress)
-            : requestedAddress === USDC_ADDRESS.toLowerCase()
-              ? 1
-              : requestedAddress === WETH_ADDRESS.toLowerCase()
-                ? 3500
-                : null,
-        change24hPct:
-          requestedAddress === USDC_ADDRESS.toLowerCase() ? 0 : (pair?.priceChange?.h24 ?? null),
-        volume24hUsd: pair?.volume?.h24 ?? null,
-        liquidityUsd: pair?.liquidity?.usd ?? null,
-        marketCap: pair?.marketCap ?? pair?.fdv ?? null,
-        pairAddress: pair?.pairAddress,
-      };
-    });
+    return {
+      address: token?.address ?? requestedAddress,
+      symbol:
+        requestedAddress === ETH_ADDRESS.toLowerCase()
+          ? "ETH"
+          : (token?.symbol ??
+            fallbackToken?.symbol ??
+            `${requestedAddress.slice(0, 4)}…${requestedAddress.slice(-4)}`),
+      name:
+        requestedAddress === ETH_ADDRESS.toLowerCase()
+          ? "Ethereum"
+          : (token?.name ?? fallbackToken?.name ?? requestedAddress),
+      decimals:
+        token?.decimals ?? (requestedAddress === ETH_ADDRESS.toLowerCase() ? 18 : undefined),
+      logoUri: pair?.info?.imageUrl,
+      priceUsd: pair?.pairAddress
+        ? pairTokenUsdPrice(pair, dexAddress)
+        : requestedAddress === USDC_ADDRESS.toLowerCase()
+          ? 1
+          : requestedAddress === WETH_ADDRESS.toLowerCase()
+            ? 3500
+            : null,
+      change24hPct:
+        requestedAddress === USDC_ADDRESS.toLowerCase() ? 0 : (pair?.priceChange?.h24 ?? null),
+      volume24hUsd: pair?.volume?.h24 ?? null,
+      liquidityUsd: pair?.liquidity?.usd ?? null,
+      marketCap: pair?.marketCap ?? pair?.fdv ?? null,
+      pairAddress: pair?.pairAddress,
+    };
+  });
 }
 
 export async function getNetworkSnapshot() {
