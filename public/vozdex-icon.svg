@@ -1,0 +1,14 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vozdexGradient" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4FF8A" />
+      <stop offset="1" stop-color="#C2FF00" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="18" fill="#07080B" />
+  <path
+    d="M18 18L28.5 46H35.5L46 18H39.2L32 38.4L24.8 18H18Z"
+    fill="url(#vozdexGradient)"
+  />
+  <rect x="4.5" y="4.5" width="55" height="55" rx="17.5" stroke="#F4FF8A" stroke-opacity="0.24" />
+</svg>
