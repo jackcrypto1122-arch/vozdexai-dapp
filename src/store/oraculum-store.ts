@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { CASHCAT_ADDRESS, ETH_ADDRESS } from "@/lib/constants";
+import { ARROW_ADDRESS, WETH_ADDRESS } from "@/lib/constants";
 import type { ExecutionStatus, TokenInfo, VoiceIntent } from "@/types/dapp";
 
 type OraculumState = {
@@ -26,8 +26,8 @@ type OraculumState = {
 export const useOraculumStore = create<OraculumState>()(
   persist(
     (set) => ({
-      swapInputAddress: ETH_ADDRESS,
-      swapOutputAddress: CASHCAT_ADDRESS,
+      swapInputAddress: WETH_ADDRESS,
+      swapOutputAddress: ARROW_ADDRESS,
       swapAmount: "1",
       slippageBps: 50,
       priorityFee: "auto",

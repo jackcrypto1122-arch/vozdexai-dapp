@@ -7,8 +7,6 @@ import {
   type Chain,
 } from "viem";
 import {
-  ARROW_ADDRESS,
-  CASHCAT_ADDRESS,
   DEFAULT_RPC_URL,
   ETH_ADDRESS,
   USDC_ADDRESS,
@@ -131,10 +129,12 @@ export async function getQuote(request: QuoteRequest): Promise<QuoteResponse> {
   } catch {
     // Fallback mock if anything fails
     const MOCK_PRICES: Record<string, number> = {
-      ETH: 3500,
+      WETH: 3500,
       USDC: 1,
-      ARROW: 1.62,
-      CASHCAT: 0.142,
+      ARROW: 1.43,
+      CASHCAT: 0.1655,
+      HOODRAT: 0.01346,
+      JUGGERNAUT: 0.01284,
     };
 
     const amountInUi = Number(formatUnits(amountIn, decimalsIn));
@@ -199,25 +199,27 @@ export async function getWalletBalances(walletAddress: string): Promise<WalletBa
 
   const prices = await getDexScreenerPrices([...FEATURED_TOKENS]);
 
-  // Native ETH
-  const ethBalance = await publicClient.getBalance({ address: walletAddress as `0x${string}` });
-  const ethToken = FEATURED_TOKENS.find((t) => t.address === ETH_ADDRESS)!;
-  const ethPriceData = prices[ETH_ADDRESS.toLowerCase()];
-  const ethUsdPrice = ethPriceData?.usd ?? 3500;
-  const ethAmountUi = Number(formatUnits(ethBalance, ethToken.decimals));
+  const nativeEthToken = FEATURED_TOKENS.find((token) => token.address === ETH_ADDRESS);
 
-  balances.push({
-    address: ETH_ADDRESS,
-    symbol: ethToken.symbol,
-    name: ethToken.name,
-    decimals: ethToken.decimals,
-    amountRaw: ethBalance.toString(),
-    amountUi: ethAmountUi,
-    usdPrice: ethUsdPrice || null,
-    usdValue: ethPriceData?.usd ? ethAmountUi * ethUsdPrice : null,
-    priceChange24hPct: ethPriceData?.usd_24h_change ?? 2.5,
-    isNativeEth: true,
-  });
+  if (nativeEthToken) {
+    const ethBalance = await publicClient.getBalance({ address: walletAddress as `0x${string}` });
+    const ethPriceData = prices[ETH_ADDRESS.toLowerCase()];
+    const ethUsdPrice = ethPriceData?.usd ?? 3500;
+    const ethAmountUi = Number(formatUnits(ethBalance, nativeEthToken.decimals));
+
+    balances.push({
+      address: ETH_ADDRESS,
+      symbol: nativeEthToken.symbol,
+      name: nativeEthToken.name,
+      decimals: nativeEthToken.decimals,
+      amountRaw: ethBalance.toString(),
+      amountUi: ethAmountUi,
+      usdPrice: ethUsdPrice || null,
+      usdValue: ethPriceData?.usd ? ethAmountUi * ethUsdPrice : null,
+      priceChange24hPct: ethPriceData?.usd_24h_change ?? 2.5,
+      isNativeEth: true,
+    });
+  }
 
   // ERC20 tokens
   for (const token of FEATURED_TOKENS.filter((t) => t.address !== ETH_ADDRESS)) {
@@ -364,14 +366,8 @@ type DexPair = {
   quoteToken: { address: string; name: string; symbol: string };
 };
 
-type DexDiscoveryItem = {
-  chainId?: string;
-  tokenAddress?: string;
-};
-
 const DEXSCREENER_CHAIN_ID = "robinhood";
 const DEXSCREENER_BATCH_LIMIT = 25;
-const LIVE_DISCOVERY_LIMIT = 24;
 
 function chunk<T>(values: T[], size: number) {
   const chunks: T[][] = [];
@@ -454,22 +450,6 @@ async function getDexPairsForAddresses(addresses: string[]) {
   return pairs.filter((pair) => pair.chainId === DEXSCREENER_CHAIN_ID);
 }
 
-async function discoverRobinhoodTokenAddresses(limit = LIVE_DISCOVERY_LIMIT) {
-  const [profiles, boosts] = await Promise.all([
-    fetchDexJson<DexDiscoveryItem[]>("https://api.dexscreener.com/token-profiles/latest/v1", 60),
-    fetchDexJson<DexDiscoveryItem[]>("https://api.dexscreener.com/token-boosts/top/v1", 60),
-  ]);
-
-  const seeds = [WETH_ADDRESS, ARROW_ADDRESS, CASHCAT_ADDRESS];
-  const discovered = [...(profiles ?? []), ...(boosts ?? [])]
-    .filter((item) => item.chainId === DEXSCREENER_CHAIN_ID && item.tokenAddress)
-    .map((item) => item.tokenAddress as string);
-
-  return Array.from(
-    new Set([...seeds, ...discovered].map((address) => toDexTokenAddress(address).toLowerCase())),
-  ).slice(0, limit);
-}
-
 async function getDexScreenerPrices(
   tokens: { address: string; symbol: string }[],
 ): Promise<Record<string, DexPrice>> {
@@ -483,7 +463,13 @@ async function getDexScreenerPrices(
     const usdPrice = pair ? pairTokenUsdPrice(pair, dexAddress) : null;
 
     result[requestedAddress] = {
-      usd: usdPrice ?? (token.symbol === "ETH" ? 3500 : token.symbol === "USDC" ? 1 : 0),
+      usd:
+        usdPrice ??
+        (token.symbol === "ETH" || token.symbol === "WETH"
+          ? 3500
+          : token.symbol === "USDC"
+            ? 1
+            : 0),
       usd_24h_change: pair?.priceChange?.h24 ?? 0,
       usd_24h_vol: pair?.volume?.h24 ?? 0,
       market_cap: pair?.marketCap ?? pair?.fdv ?? 0,
@@ -495,7 +481,7 @@ async function getDexScreenerPrices(
 
 export async function getMarketRows(addresses: string[] = []): Promise<MarketRow[]> {
   const requestedAddresses =
-    addresses.length > 0 ? addresses : [ETH_ADDRESS, ...(await discoverRobinhoodTokenAddresses())];
+    addresses.length > 0 ? addresses : FEATURED_TOKENS.map((token) => token.address);
 
   const uniqueRequested = Array.from(
     new Set(requestedAddresses.map((address) => normalizeTokenAddress(address).toLowerCase())),
@@ -546,17 +532,22 @@ export async function getMarketRows(addresses: string[] = []): Promise<MarketRow
         decimals:
           token?.decimals ?? (requestedAddress === ETH_ADDRESS.toLowerCase() ? 18 : undefined),
         logoUri: pair?.info?.imageUrl,
-        priceUsd: pair ? pairTokenUsdPrice(pair, dexAddress) : null,
-        change24hPct: pair?.priceChange?.h24 ?? null,
+        priceUsd:
+          pair?.pairAddress
+            ? pairTokenUsdPrice(pair, dexAddress)
+            : requestedAddress === USDC_ADDRESS.toLowerCase()
+              ? 1
+              : requestedAddress === WETH_ADDRESS.toLowerCase()
+                ? 3500
+                : null,
+        change24hPct:
+          requestedAddress === USDC_ADDRESS.toLowerCase() ? 0 : (pair?.priceChange?.h24 ?? null),
         volume24hUsd: pair?.volume?.h24 ?? null,
         liquidityUsd: pair?.liquidity?.usd ?? null,
         marketCap: pair?.marketCap ?? pair?.fdv ?? null,
         pairAddress: pair?.pairAddress,
       };
-    })
-    .filter(
-      (row) => row.priceUsd != null || row.volume24hUsd != null || row.address === ETH_ADDRESS,
-    );
+    });
 }
 
 export async function getNetworkSnapshot() {
