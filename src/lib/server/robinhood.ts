@@ -199,8 +199,36 @@ export async function getWalletBalances(walletAddress: string): Promise<WalletBa
 
   const prices = await getDexScreenerPrices([...FEATURED_TOKENS]);
 
-  // ERC20 tokens (all featured tokens are ERC20 on Robinhood Chain)
-  for (const token of FEATURED_TOKENS) {
+  // Native ETH balance
+  const nativeEthToken = FEATURED_TOKENS.find((token) => token.address === ETH_ADDRESS);
+  if (nativeEthToken) {
+    try {
+      const ethBalance = await publicClient.getBalance({
+        address: walletAddress as `0x${string}`,
+      });
+      const ethPriceData = prices[ETH_ADDRESS.toLowerCase()];
+      const ethUsdPrice = ethPriceData?.usd ?? 3500;
+      const ethAmountUi = Number(formatUnits(ethBalance, nativeEthToken.decimals));
+
+      balances.push({
+        address: ETH_ADDRESS,
+        symbol: nativeEthToken.symbol,
+        name: nativeEthToken.name,
+        decimals: nativeEthToken.decimals,
+        amountRaw: ethBalance.toString(),
+        amountUi: ethAmountUi,
+        usdPrice: ethUsdPrice || null,
+        usdValue: ethPriceData?.usd ? ethAmountUi * ethUsdPrice : null,
+        priceChange24hPct: ethPriceData?.usd_24h_change ?? 0,
+        isNativeEth: true,
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  // ERC20 tokens
+  for (const token of FEATURED_TOKENS.filter((t) => t.address !== ETH_ADDRESS)) {
     try {
       const balance = await publicClient.readContract({
         address: token.address as `0x${string}`,

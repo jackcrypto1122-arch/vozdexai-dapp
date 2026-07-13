@@ -24,6 +24,7 @@ export const KNOWN_POOL_TO_TOKEN_ADDRESS: Record<string, string> = {
 };
 
 export const FEATURED_TOKENS = [
+  { address: ETH_ADDRESS, symbol: "ETH", name: "Ethereum", decimals: 18 },
   { address: WETH_ADDRESS, symbol: "WETH", name: "Wrapped Ether", decimals: 18 },
   { address: USDC_ADDRESS, symbol: "USDC", name: "USD Coin", decimals: 6 },
   { address: ARROW_ADDRESS, symbol: "ARROW", name: "Arrow", decimals: 18 },
