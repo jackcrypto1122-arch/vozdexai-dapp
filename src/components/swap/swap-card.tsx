@@ -105,17 +105,17 @@ export function SwapCard() {
   const amountNumber = Number.parseFloat(swapAmount || "0");
   const quoteRequest =
     isConnected &&
-      inputToken &&
-      outputToken &&
-      amountNumber > 0 &&
-      inputToken.address !== outputToken.address
+    inputToken &&
+    outputToken &&
+    amountNumber > 0 &&
+    inputToken.address !== outputToken.address
       ? {
-        inputAddress: inputToken.address,
-        outputAddress: outputToken.address,
-        amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
-        slippageBps,
-        walletAddress: walletAddress!,
-      }
+          inputAddress: inputToken.address,
+          outputAddress: outputToken.address,
+          amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
+          slippageBps,
+          walletAddress: walletAddress!,
+        }
       : null;
 
   const { data: quote, isLoading: quoteLoading, refetch } = useQuote(quoteRequest);
@@ -123,14 +123,14 @@ export function SwapCard() {
   const receiveAmount =
     quote && outputToken
       ? formatAmount(
-        Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)),
-        6,
-      )
+          Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)),
+          6,
+        )
       : "0";
   const rate =
     quote && inputToken && outputToken && amountNumber > 0
       ? Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)) /
-      amountNumber
+        amountNumber
       : null;
 
   useEffect(() => {

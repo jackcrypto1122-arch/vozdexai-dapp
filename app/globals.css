@@ -94,7 +94,11 @@
 
   body {
     background:
-      radial-gradient(circle at top, color-mix(in srgb, var(--color-primary) 16%, transparent) 0%, transparent 36%),
+      radial-gradient(
+        circle at top,
+        color-mix(in srgb, var(--color-primary) 16%, transparent) 0%,
+        transparent 36%
+      ),
       linear-gradient(180deg, #050505 0%, var(--color-background) 18%, #010101 100%);
     color: var(--color-foreground);
     font-family: var(--font-sans);

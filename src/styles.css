@@ -55,19 +55,19 @@
 :root {
   --radius: 0.875rem;
   /* Oraculum luxury fintech palette */
-  --background: oklch(0.958 0.014 90);       /* #F7F4EC */
-  --foreground: oklch(0.18 0 0);             /* #111111 */
-  --card: oklch(0.985 0.008 90);             /* #FFFDF8 */
+  --background: oklch(0.958 0.014 90); /* #F7F4EC */
+  --foreground: oklch(0.18 0 0); /* #111111 */
+  --card: oklch(0.985 0.008 90); /* #FFFDF8 */
   --card-foreground: oklch(0.18 0 0);
   --popover: oklch(0.985 0.008 90);
   --popover-foreground: oklch(0.18 0 0);
-  --primary: oklch(0.72 0.17 152);           /* #19C37D green */
+  --primary: oklch(0.72 0.17 152); /* #19C37D green */
   --primary-foreground: oklch(0.15 0 0);
   --secondary: oklch(0.93 0.012 90);
   --secondary-foreground: oklch(0.18 0 0);
   --muted: oklch(0.93 0.012 90);
-  --muted-foreground: oklch(0.5 0 0);        /* #6B6B6B */
-  --accent: oklch(0.78 0.09 80);             /* gold-tinted */
+  --muted-foreground: oklch(0.5 0 0); /* #6B6B6B */
+  --accent: oklch(0.78 0.09 80); /* gold-tinted */
   --accent-foreground: oklch(0.15 0 0);
   --destructive: oklch(0.6 0.22 25);
   --destructive-foreground: oklch(0.985 0.003 90);
@@ -81,17 +81,17 @@
   --chart-5: oklch(0.35 0.05 260);
 
   /* Dark sidebar (always dark, regardless of theme) */
-  --sidebar: oklch(0.14 0 0);                /* #0E0F0E */
+  --sidebar: oklch(0.14 0 0); /* #0E0F0E */
   --sidebar-foreground: oklch(0.92 0 0);
   --sidebar-primary: oklch(0.72 0.17 152);
   --sidebar-primary-foreground: oklch(0.12 0 0);
   --sidebar-accent: oklch(0.22 0 0);
   --sidebar-accent-foreground: oklch(0.95 0 0);
-  --sidebar-border: oklch(0.24 0 0);         /* #1E1E1E */
+  --sidebar-border: oklch(0.24 0 0); /* #1E1E1E */
   --sidebar-ring: oklch(0.72 0.17 152);
 
-  --gold: oklch(0.76 0.09 80);               /* #C9A86A */
-  --ink: oklch(0.14 0 0);                    /* deep near-black */
+  --gold: oklch(0.76 0.09 80); /* #C9A86A */
+  --ink: oklch(0.14 0 0); /* deep near-black */
   --cream: oklch(0.985 0.008 90);
 }
 
@@ -131,7 +131,9 @@
   }
 
   .font-serif,
-  h1, h2, h3 {
+  h1,
+  h2,
+  h3 {
     font-family: var(--font-serif);
     font-weight: 500;
     letter-spacing: -0.02em;
@@ -140,40 +142,85 @@
 
 /* ─── Oraculum animations ─────────────────────────────────────── */
 @keyframes oraculum-pulse-ring {
-  0%   { transform: scale(0.9);  opacity: 0.7; }
-  70%  { transform: scale(1.6);  opacity: 0;   }
-  100% { transform: scale(1.6);  opacity: 0;   }
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
 }
 @keyframes oraculum-blink {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
 }
 @keyframes oraculum-wave {
-  0%,100% { transform: scaleY(0.3); }
-  50%     { transform: scaleY(1);   }
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
 @keyframes oraculum-spin-slow {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes oraculum-float {
-  0%,100% { transform: translateY(0); }
-  50%     { transform: translateY(-6px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
 }
 
-@utility animate-pulse-ring { animation: oraculum-pulse-ring 2.4s cubic-bezier(0.4,0,0.6,1) infinite; }
-@utility animate-blink      { animation: oraculum-blink 1.05s steps(1) infinite; }
-@utility animate-wave       { animation: oraculum-wave 1.1s ease-in-out infinite; }
-@utility animate-spin-slow  { animation: oraculum-spin-slow 22s linear infinite; }
-@utility animate-float      { animation: oraculum-float 4s ease-in-out infinite; }
+@utility animate-pulse-ring {
+  animation: oraculum-pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@utility animate-blink {
+  animation: oraculum-blink 1.05s steps(1) infinite;
+}
+@utility animate-wave {
+  animation: oraculum-wave 1.1s ease-in-out infinite;
+}
+@utility animate-spin-slow {
+  animation: oraculum-spin-slow 22s linear infinite;
+}
+@utility animate-float {
+  animation: oraculum-float 4s ease-in-out infinite;
+}
 
-@utility text-balance { text-wrap: balance; }
+@utility text-balance {
+  text-wrap: balance;
+}
 
 /* Subtle grain overlay used for luxury feel */
 @utility bg-grain {
   background-image:
     radial-gradient(oklch(0 0 0 / 0.035) 1px, transparent 1px),
     radial-gradient(oklch(0 0 0 / 0.025) 1px, transparent 1px);
-  background-size: 3px 3px, 7px 7px;
-  background-position: 0 0, 1px 2px;
+  background-size:
+    3px 3px,
+    7px 7px;
+  background-position:
+    0 0,
+    1px 2px;
 }

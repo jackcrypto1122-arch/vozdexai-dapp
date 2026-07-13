@@ -203,7 +203,7 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
 
   // Find dex configuration for the non-ETH token (which dictates the pool we use)
   const nonEthTokenInfo = isNativeIn ? tokenOutInfo : tokenInInfo;
-  const feeTier = (nonEthTokenInfo as any)?.feeTier || 2888;
+  const feeTier = (nonEthTokenInfo as { feeTier?: number })?.feeTier || 2888;
   const feeHex = feeTier.toString(16).padStart(64, "0");
 
   const ROUTER_AS_RECIPIENT = "0x0000000000000000000000000000000000000002" as `0x${string}`;
@@ -214,7 +214,7 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
 
   // We use the EXACT hex structure from the successful Robinhood Chain transaction.
   const pad32 = (hexOrNum: string | bigint | number) => {
-    let raw = typeof hexOrNum === "string" ? hexOrNum.replace("0x", "") : hexOrNum.toString(16);
+    const raw = typeof hexOrNum === "string" ? hexOrNum.replace("0x", "") : hexOrNum.toString(16);
     return raw.padStart(64, "0");
   };
 
@@ -232,10 +232,7 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
     const takeRecipient = isNativeIn ? recipient : ROUTER_AS_RECIPIENT;
     const p2: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(takeToken)}${pad32(takeRecipient)}0000000000000000000000000000000000000000000000000000000000000000`;
 
-    return encodeAbiParameters(V4_WRAPPER_ABI, [
-      `0x070b0e` as Hex,
-      [p0, p1, p2]
-    ]);
+    return encodeAbiParameters(V4_WRAPPER_ABI, [`0x070b0e` as Hex, [p0, p1, p2]]);
   };
 
   if (isNativeIn) {
@@ -273,7 +270,6 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
 
     inputs = [v4Payload];
   }
-
 
   const data = encodeFunctionData({
     abi: UNIVERSAL_ROUTER_ABI,
