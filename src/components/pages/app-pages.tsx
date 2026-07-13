@@ -689,11 +689,23 @@ export function SettingsRoutePage() {
             <label className="block text-sm text-muted-foreground">
               Slippage: <span className="text-foreground">{(slippageBps / 100).toFixed(2)}%</span>
             </label>
+            <div className="flex gap-2 mb-2">
+              {[10, 20, 30, 40, 50].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => setSlippage(pct * 100)}
+                  className="rounded-lg border border-border/70 bg-background/50 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground hover:border-primary/50"
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
             <input
               type="range"
               min={10}
-              max={300}
-              step={5}
+              max={5000}
+              step={10}
               value={slippageBps}
               onChange={(event) => setSlippage(Number(event.target.value))}
               className="w-full"
