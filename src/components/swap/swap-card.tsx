@@ -36,6 +36,38 @@ function isBalanceAmount(value: string) {
   return value.trim().toLowerCase() === "max";
 }
 
+function getWalletErrorMessage(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "Swap submission failed.";
+  }
+
+  const walletError = error as {
+    code?: number;
+    message?: string;
+    shortMessage?: string;
+    details?: string;
+    cause?: unknown;
+  };
+
+  const messages = [
+    walletError.shortMessage,
+    walletError.message,
+    walletError.details,
+    walletError.cause instanceof Error ? walletError.cause.message : undefined,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+
+  if (
+    walletError.code === 4001 ||
+    /user (rejected|denied)|rejected the request|denied transaction signature/i.test(messages)
+  ) {
+    return "Transaction was cancelled in your wallet.";
+  }
+
+  return messages || "Swap submission failed.";
+}
+
 export function SwapCard() {
   const { address: walletAddress, isConnected } = useAccount();
   const publicClient = usePublicClient();
@@ -412,9 +444,14 @@ export function SwapCard() {
         "Approvals succeeded, but the Robinhood RPC did not expose them in time. Try Swap again.",
       );
     } catch (submissionError) {
-      setError(
-        submissionError instanceof Error ? submissionError.message : "Swap submission failed.",
-      );
+      const friendlyError = getWalletErrorMessage(submissionError);
+      const rejectedInWallet = friendlyError === "Transaction was cancelled in your wallet.";
+
+      setError(friendlyError);
+      if (rejectedInWallet) {
+        setVoiceReviewRequired(false);
+        setLastIntent(undefined);
+      }
       return false;
     } finally {
       setIsSubmitting(false);
