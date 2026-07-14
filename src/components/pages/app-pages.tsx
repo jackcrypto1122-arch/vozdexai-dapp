@@ -690,7 +690,7 @@ export function SettingsRoutePage() {
               Slippage: <span className="text-foreground">{(slippageBps / 100).toFixed(2)}%</span>
             </label>
             <div className="flex gap-2 mb-2">
-              {[10, 20, 30, 40, 50].map((pct) => (
+              {[0.5, 1, 2.5, 5].map((pct) => (
                 <button
                   key={pct}
                   type="button"

@@ -59,12 +59,20 @@ export type HistoryItem = {
   kind: "swap" | "send" | "receive" | "stake" | "unknown";
 };
 
+export type Permit2Permit = {
+  amount: string;
+  expiration: number;
+  nonce: number;
+  sigDeadline: string;
+  signature: string;
+};
 export type QuoteRequest = {
   inputAddress: string;
   outputAddress: string;
   amountRaw: string;
   slippageBps: number;
   walletAddress: string;
+  permit2Permit?: Permit2Permit;
 };
 
 export type QuoteResponse = {
@@ -83,7 +91,19 @@ export type SwapBuildResponse = {
   value: string;
   gas: string;
   quote: QuoteResponse;
-  approvalNeeded?: { token: string; spender: string };
+  approvalNeeded?: {
+    token: string;
+    spender: string;
+    kind: "erc20";
+  };
+  permit2SignatureNeeded?: {
+    token: string;
+    spender: string;
+    amount: string;
+    expiration: number;
+    nonce: number;
+    sigDeadline: string;
+  };
 };
 
 export type ExecutionStatus = {
