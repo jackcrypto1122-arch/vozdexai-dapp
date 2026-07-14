@@ -1,9 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WagmiProvider, createConfig, http } from "wagmi";
+import { WagmiProvider, http } from "wagmi";
 import { getDefaultConfig, RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Toaster } from "sonner";
 import { DEFAULT_EXPLORER, DEFAULT_RPC_URL, ROBINHOOD_CHAIN_ID } from "@/lib/constants";
 import { defineChain } from "viem";
@@ -32,12 +32,18 @@ const robinhoodChain = defineChain({
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
 
-  const config = createConfig({
-    chains: [robinhoodChain],
-    transports: {
-      [robinhoodChain.id]: http(),
-    },
-  });
+  const config = useMemo(
+    () =>
+      getDefaultConfig({
+        appName: "Vozdex AI",
+        projectId: "YOUR_PROJECT_ID", // We can use a dummy for now, or check if there's one in env!
+        chains: [robinhoodChain],
+        transports: {
+          [robinhoodChain.id]: http(),
+        },
+      }),
+    [],
+  );
 
   return (
     <WagmiProvider config={config}>
