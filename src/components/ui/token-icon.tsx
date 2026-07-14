@@ -16,10 +16,12 @@ const DEFAULT_COLOR = { bg: "bg-gradient-to-br from-zinc-500 to-zinc-700", text:
 
 export function TokenIcon({
   symbol,
+  logoUri,
   size = "md",
   className,
 }: {
   symbol?: string;
+  logoUri?: string;
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
@@ -30,6 +32,16 @@ export function TokenIcon({
     md: "h-10 w-10 text-sm",
     lg: "h-14 w-14 text-lg",
   };
+
+  if (logoUri) {
+    return (
+      <img
+        src={logoUri}
+        alt={symbol ?? "Token"}
+        className={cn("shrink-0 rounded-full object-cover", sizeClasses[size], className)}
+      />
+    );
+  }
 
   return (
     <div

@@ -46,7 +46,10 @@ export function TokenSelectField({
         onClick={() => setOpen(!open)}
         className="flex w-full min-w-40 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-foreground shadow-sm transition-colors hover:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/40"
       >
-        <span className="truncate">
+        <span className="flex items-center gap-2 truncate">
+          {currentToken?.logoUri && (
+            <img src={currentToken.logoUri} alt={currentToken.name} className="h-5 w-5 rounded-full" />
+          )}
           {currentToken ? `${currentToken.symbol} · ${currentToken.name}` : "Select Token"}
         </span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -68,13 +71,22 @@ export function TokenSelectField({
                 }}
                 className="group flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-primary/10 hover:text-primary"
               >
-                <div className="flex flex-col">
-                  <span className="font-semibold text-foreground transition-colors group-hover:text-primary">
-                    {token.symbol}
-                  </span>
-                  <span className="text-xs text-muted-foreground transition-colors group-hover:text-primary/70">
-                    {token.name}
-                  </span>
+                <div className="flex items-center gap-3">
+                  {token.logoUri && (
+                    <img
+                      src={token.logoUri}
+                      alt={token.name}
+                      className="h-7 w-7 rounded-full"
+                    />
+                  )}
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-foreground transition-colors group-hover:text-primary">
+                      {token.symbol}
+                    </span>
+                    <span className="text-xs text-muted-foreground transition-colors group-hover:text-primary/70">
+                      {token.name}
+                    </span>
+                  </div>
                 </div>
                 {value.toLowerCase() === token.address.toLowerCase() && (
                   <Check className="h-4 w-4 text-primary" />
