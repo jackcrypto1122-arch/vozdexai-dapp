@@ -9,7 +9,12 @@ import type { TokenInfo } from "@/types/dapp";
 function dedupeTokens(tokens: TokenInfo[]) {
   const byAddress = new Map<string, TokenInfo>();
   for (const token of tokens) {
-    byAddress.set(token.address.toLowerCase(), token);
+    const existing = byAddress.get(token.address.toLowerCase());
+    byAddress.set(token.address.toLowerCase(), {
+      ...(existing || {}),
+      ...token,
+      logoUri: existing?.logoUri || token.logoUri,
+    });
   }
   return Array.from(byAddress.values());
 }
