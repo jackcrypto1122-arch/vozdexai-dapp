@@ -14,9 +14,9 @@ export const metadata: Metadata = {
   description:
     "Vozdex AI is a voice-assisted trading terminal for Robinhood Chain with live wallet, market, quote, and execution flows.",
   icons: {
-    icon: "/vozdex-icon.svg",
-    shortcut: "/vozdex-icon.svg",
-    apple: "/vozdex-icon.svg",
+    icon: "/icon.jpg",
+    shortcut: "/icon.jpg",
+    apple: "/icon.jpg",
   },
 };
 
