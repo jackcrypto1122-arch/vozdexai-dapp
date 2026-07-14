@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   useAccount,
@@ -32,6 +32,10 @@ type TokenChoice = {
   logoUri?: string;
 };
 
+function isBalanceAmount(value: string) {
+  return value.trim().toLowerCase() === "max";
+}
+
 export function SwapCard() {
   const { address: walletAddress, isConnected } = useAccount();
   const publicClient = usePublicClient();
@@ -46,11 +50,21 @@ export function SwapCard() {
   const swapOutputAddress = useOraculumStore((state) => state.swapOutputAddress);
   const swapAmount = useOraculumStore((state) => state.swapAmount);
   const slippageBps = useOraculumStore((state) => state.slippageBps);
+  const voiceReviewRequired = useOraculumStore((state) => state.voiceReviewRequired);
+  const queuedVoiceCommand = useOraculumStore((state) => state.queuedVoiceCommand);
+  const voiceCommandVersion = useOraculumStore((state) => state.voiceCommandVersion);
   const setSwapPair = useOraculumStore((state) => state.setSwapPair);
   const setSwapAmount = useOraculumStore((state) => state.setSwapAmount);
+  const setLastIntent = useOraculumStore((state) => state.setLastIntent);
+  const setVoiceReviewRequired = useOraculumStore((state) => state.setVoiceReviewRequired);
+  const clearQueuedVoiceCommand = useOraculumStore((state) => state.clearQueuedVoiceCommand);
   const upsertExecution = useOraculumStore((state) => state.upsertExecution);
 
-  const { data: balances } = useWalletBalances(walletAddress);
+  const {
+    data: balances,
+    isLoading: balancesLoading,
+    isFetching: balancesFetching,
+  } = useWalletBalances(walletAddress);
   const { data: marketPayload } = useMarkets();
   const markets = useMemo(() => marketPayload?.markets ?? [], [marketPayload?.markets]);
   const tokenOptions = useTokenOptions();
@@ -123,21 +137,40 @@ export function SwapCard() {
     return tokenOptions.filter((t) => isEthLike(t.address));
   }, [tokenOptions, inputIsEth]);
 
-  const amountNumber = Number.parseFloat(swapAmount || "0");
-  const quoteRequest =
-    isConnected &&
-    inputToken &&
-    outputToken &&
-    amountNumber > 0 &&
-    inputToken.address !== outputToken.address
-      ? {
-          inputAddress: inputToken.address,
-          outputAddress: outputToken.address,
-          amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
-          slippageBps,
-          walletAddress: walletAddress!,
-        }
-      : null;
+  const resolvedSwapAmount = useMemo(() => {
+    if (!isBalanceAmount(swapAmount) || inputToken?.balanceRaw == null) {
+      return swapAmount;
+    }
+
+    return formatUnits(BigInt(inputToken.balanceRaw), inputToken.decimals);
+  }, [inputToken?.balanceRaw, inputToken?.decimals, swapAmount]);
+
+  const amountNumber = Number.parseFloat(resolvedSwapAmount || "0");
+  const quoteRequest = useMemo(
+    () =>
+      isConnected &&
+      inputToken &&
+      outputToken &&
+      amountNumber > 0 &&
+      inputToken.address !== outputToken.address
+        ? {
+            inputAddress: inputToken.address,
+            outputAddress: outputToken.address,
+            amountRaw: parseUnits(resolvedSwapAmount, inputToken.decimals).toString(),
+            slippageBps,
+            walletAddress: walletAddress!,
+          }
+        : null,
+    [
+      amountNumber,
+      inputToken,
+      isConnected,
+      outputToken,
+      resolvedSwapAmount,
+      slippageBps,
+      walletAddress,
+    ],
+  );
 
   const {
     data: quote,
@@ -218,14 +251,14 @@ export function SwapCard() {
     setError(null);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     if (!isConnected || !walletAddress || !inputToken || !outputToken || !quoteRequest || !quote) {
       setError("Connect a wallet and enter a valid amount to request a live quote.");
-      return;
+      return false;
     }
     if (!publicClient) {
       setError("Robinhood Chain client is unavailable.");
-      return;
+      return false;
     }
 
     type SwapPayload = {
@@ -370,7 +403,9 @@ export function SwapCard() {
           gas: payload.gas ? BigInt(payload.gas) : undefined,
         });
         setHash(swapHash);
-        return;
+        setVoiceReviewRequired(false);
+        setLastIntent(undefined);
+        return true;
       }
 
       throw new Error(
@@ -380,10 +415,103 @@ export function SwapCard() {
       setError(
         submissionError instanceof Error ? submissionError.message : "Swap submission failed.",
       );
+      return false;
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [
+    inputToken,
+    isConnected,
+    outputToken,
+    publicClient,
+    quote,
+    quoteRequest,
+    sendTransactionAsync,
+    setLastIntent,
+    setVoiceReviewRequired,
+    signTypedDataAsync,
+    walletAddress,
+  ]);
+
+  useEffect(() => {
+    if (!queuedVoiceCommand) {
+      return;
+    }
+
+    if (queuedVoiceCommand === "cancel") {
+      clearQueuedVoiceCommand();
+      setVoiceReviewRequired(false);
+      setLastIntent(undefined);
+      setError(null);
+      return;
+    }
+
+    if (quoteLoading || isPending || isSubmitting || isConfirming) {
+      return;
+    }
+
+    const waitingForMaxBalance =
+      isBalanceAmount(swapAmount) &&
+      isConnected &&
+      inputToken?.balanceRaw == null &&
+      (balancesLoading || balancesFetching || typeof balances === "undefined");
+
+    if (waitingForMaxBalance) {
+      return;
+    }
+
+    if (!voiceReviewRequired) {
+      setError("No pending swap to confirm.");
+      clearQueuedVoiceCommand();
+      return;
+    }
+
+    if (quoteError instanceof Error) {
+      setError(quoteError.message);
+      clearQueuedVoiceCommand();
+      return;
+    }
+
+    if (!quoteRequest) {
+      setError("Voice confirmation is waiting for a complete live swap request.");
+      clearQueuedVoiceCommand();
+      return;
+    }
+
+    if (!quote) {
+      setError("Voice confirmation needs a valid live quote before execution.");
+      clearQueuedVoiceCommand();
+      return;
+    }
+
+    clearQueuedVoiceCommand();
+    void handleSubmit();
+  }, [
+    balances,
+    balancesFetching,
+    balancesLoading,
+    clearQueuedVoiceCommand,
+    handleSubmit,
+    inputToken?.balanceRaw,
+    isConnected,
+    isConfirming,
+    isPending,
+    isSubmitting,
+    queuedVoiceCommand,
+    quote,
+    quoteError,
+    quoteLoading,
+    quoteRequest,
+    resolvedSwapAmount,
+    setLastIntent,
+    setVoiceReviewRequired,
+    swapInputAddress,
+    swapAmount,
+    swapOutputAddress,
+    voiceCommandVersion,
+    voiceReviewRequired,
+    inputToken?.address,
+  ]);
 
   const networkFeeDisplay = quote?.estimatedGas
     ? `${formatAmount(Number(formatUnits(BigInt(quote.estimatedGas), 9)), 6)} ETH`
@@ -397,7 +525,7 @@ export function SwapCard() {
           label="You pay"
           tokens={inputTokenOptions}
           token={inputToken}
-          amount={swapAmount}
+          amount={resolvedSwapAmount}
           onAmount={setSwapAmount}
           onTokenChange={(address) => {
             // If user picks a non-ETH input, force output to ETH
@@ -526,6 +654,12 @@ export function SwapCard() {
           {error ??
             (quoteError instanceof Error ? quoteError.message : null) ??
             "Connect a wallet to trade."}
+        </div>
+      )}
+
+      {voiceReviewRequired && isConnected && (
+        <div className="border-t border-border/60 px-6 py-3 text-center text-sm text-foreground">
+          Say "confirm" to execute or "cancel" to stop
         </div>
       )}
 

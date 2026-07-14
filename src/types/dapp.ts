@@ -119,7 +119,7 @@ export type ExecutionStatus = {
 };
 
 export type VoiceIntent = {
-  action: "swap" | "buy" | "sell" | "send" | "stake" | "unknown";
+  action: "swap" | "buy" | "sell" | "send" | "stake" | "confirm" | "cancel" | "unknown";
   inputSymbol?: string;
   outputSymbol?: string;
   amount?: string;

@@ -477,6 +477,8 @@ export function VoiceRoutePage() {
   const setLastIntent = useOraculumStore((state) => state.setLastIntent);
   const setSwapPair = useOraculumStore((state) => state.setSwapPair);
   const setSwapAmount = useOraculumStore((state) => state.setSwapAmount);
+  const setVoiceReviewRequired = useOraculumStore((state) => state.setVoiceReviewRequired);
+  const queueVoiceCommand = useOraculumStore((state) => state.queueVoiceCommand);
 
   const parseTranscript = async (rawTranscript?: string) => {
     const transcript = rawTranscript ?? speech.transcript;
@@ -498,6 +500,11 @@ export function VoiceRoutePage() {
 
       setIntent(payload);
       setLastIntent(payload);
+      if (payload.action === "confirm" || payload.action === "cancel") {
+        queueVoiceCommand(payload.action);
+        return;
+      }
+
       const inputAddress = payload.inputSymbol ? SYMBOL_TO_ADDRESS[payload.inputSymbol] : undefined;
       const outputAddress = payload.outputSymbol
         ? SYMBOL_TO_ADDRESS[payload.outputSymbol]
@@ -508,6 +515,14 @@ export function VoiceRoutePage() {
       }
       if (payload.amount) {
         setSwapAmount(payload.amount);
+      }
+      if (
+        (payload.action === "swap" || payload.action === "buy" || payload.action === "sell") &&
+        payload.amount &&
+        inputAddress &&
+        outputAddress
+      ) {
+        setVoiceReviewRequired(true);
       }
     } finally {
       setIsParsing(false);

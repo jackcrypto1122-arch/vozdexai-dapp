@@ -27,6 +27,8 @@ export function VoiceButton() {
   const setLastIntent = useOraculumStore((state) => state.setLastIntent);
   const setSwapPair = useOraculumStore((state) => state.setSwapPair);
   const setSwapAmount = useOraculumStore((state) => state.setSwapAmount);
+  const setVoiceReviewRequired = useOraculumStore((state) => state.setVoiceReviewRequired);
+  const queueVoiceCommand = useOraculumStore((state) => state.queueVoiceCommand);
 
   useEffect(() => {
     const t = setInterval(() => setIdx((i) => (i + 1) % examples.length), 3200);
@@ -53,6 +55,11 @@ export function VoiceButton() {
 
         setIntent(payload);
         setLastIntent(payload);
+        if (payload.action === "confirm" || payload.action === "cancel") {
+          queueVoiceCommand(payload.action);
+          return;
+        }
+
         if (payload.amount) {
           setSwapAmount(payload.amount);
         }
@@ -66,11 +73,20 @@ export function VoiceButton() {
         if (inputAddress && outputAddress) {
           setSwapPair(inputAddress, outputAddress);
         }
+
+        if (
+          (payload.action === "swap" || payload.action === "buy" || payload.action === "sell") &&
+          payload.amount &&
+          inputAddress &&
+          outputAddress
+        ) {
+          setVoiceReviewRequired(true);
+        }
       } finally {
         setIsParsing(false);
       }
     },
-    [setLastIntent, setSwapAmount, setSwapPair],
+    [queueVoiceCommand, setLastIntent, setSwapAmount, setSwapPair, setVoiceReviewRequired],
   );
 
   useEffect(() => {
@@ -146,7 +162,9 @@ export function VoiceButton() {
                 {isParsing
                   ? "Parsing intent"
                   : intent
-                    ? `${intent.action} ${intent.outputSymbol ?? ""}`.trim()
+                    ? intent.action === "confirm" || intent.action === "cancel"
+                      ? intent.action
+                      : `${intent.action} ${intent.outputSymbol ?? ""}`.trim()
                     : "Ready"}
               </p>
             </div>

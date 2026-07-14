@@ -12,6 +12,9 @@ type OraculumState = {
   slippageBps: number;
   priorityFee: "auto" | "low" | "medium" | "high";
   lastIntent?: VoiceIntent;
+  voiceReviewRequired: boolean;
+  queuedVoiceCommand?: "confirm" | "cancel";
+  voiceCommandVersion: number;
   executions: ExecutionStatus[];
   customTokens: TokenInfo[];
   setSwapPair: (inputAddress: string, outputAddress: string) => void;
@@ -19,6 +22,9 @@ type OraculumState = {
   setSlippage: (slippageBps: number) => void;
   setPriorityFee: (priorityFee: OraculumState["priorityFee"]) => void;
   setLastIntent: (intent?: VoiceIntent) => void;
+  setVoiceReviewRequired: (voiceReviewRequired: boolean) => void;
+  queueVoiceCommand: (command: "confirm" | "cancel") => void;
+  clearQueuedVoiceCommand: () => void;
   upsertExecution: (execution: ExecutionStatus) => void;
   upsertCustomToken: (token: TokenInfo) => void;
 };
@@ -31,6 +37,8 @@ export const useOraculumStore = create<OraculumState>()(
       swapAmount: "1",
       slippageBps: 250,
       priorityFee: "auto",
+      voiceReviewRequired: false,
+      voiceCommandVersion: 0,
       executions: [],
       customTokens: [],
       setSwapPair: (swapInputAddress, swapOutputAddress) =>
@@ -39,6 +47,13 @@ export const useOraculumStore = create<OraculumState>()(
       setSlippage: (slippageBps) => set({ slippageBps }),
       setPriorityFee: (priorityFee) => set({ priorityFee }),
       setLastIntent: (lastIntent) => set({ lastIntent }),
+      setVoiceReviewRequired: (voiceReviewRequired) => set({ voiceReviewRequired }),
+      queueVoiceCommand: (queuedVoiceCommand) =>
+        set((state) => ({
+          queuedVoiceCommand,
+          voiceCommandVersion: state.voiceCommandVersion + 1,
+        })),
+      clearQueuedVoiceCommand: () => set({ queuedVoiceCommand: undefined }),
       upsertExecution: (execution) =>
         set((state) => ({
           executions: [

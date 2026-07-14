@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const json = await request.json();
     const { transcript } = schema.parse(json);
-    const intent = parseVoiceIntent(transcript);
+    const intent = await parseVoiceIntent(transcript);
     return NextResponse.json(intent);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to parse transcript.";

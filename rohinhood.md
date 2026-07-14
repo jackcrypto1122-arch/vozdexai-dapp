@@ -3,9 +3,11 @@
 > This file is a rewrite of the original Solana-based `DAPP_OVERVIEW.md`, updated to reflect a migration to **Robinhood Chain** and a **new dark, minimal fintech design language**. Hand this file to an AI coding IDE (Claude Code, Cursor, etc.) as the spec for the migration. The **mechanism / user flows / file structure stay the same** — only the chain-specific stack, data types, and visual design change.
 
 ## Summary
+
 Oraculum is a trading dapp built with Next.js App Router, React, TypeScript, Tailwind CSS, Framer Motion, TanStack Query, Zustand, and an EVM wallet stack (wagmi + RainbowKit), now targeting **Robinhood Chain** instead of Solana.
 
 The app combines:
+
 - wallet connection (MetaMask + other EVM wallets)
 - live balances and portfolio data
 - live market data
@@ -16,7 +18,9 @@ The app combines:
 The active app entry uses the Next.js `app/` directory.
 
 ## Product Goal
+
 The dapp provides a premium trading terminal experience for Robinhood Chain users with:
+
 - manual token swapping via direct DEX router calls
 - live route and quote previews
 - wallet-aware execution
@@ -26,27 +30,30 @@ The dapp provides a premium trading terminal experience for Robinhood Chain user
 ## Chain Migration Notes
 
 ### From → To
-| Concern | Old (Solana) | New (Robinhood Chain) |
-|---|---|---|
-| Chain type | Solana L1 | EVM, Arbitrum-based L2 |
-| Chain ID | n/a | `4663` (mainnet) |
-| Gas token | SOL | ETH |
-| Chain client | `@solana/web3.js` | `viem` |
-| Wallet stack | Solana Wallet Adapter (Phantom, Solflare) | `wagmi` + `RainbowKit` |
-| Supported wallets | Phantom, Solflare | MetaMask, WalletConnect, Coinbase Wallet, Rabby, and other RainbowKit-supported connectors |
-| Swap engine | Jupiter quote/swap API | Direct on-chain calls to a Uniswap-style Router/Quoter contract |
-| Token identifier | `mint` address | `contract address` (ERC-20) |
-| RPC | Solana RPC endpoint | Robinhood Chain RPC (recommended provider: Alchemy; also QuickNode, Blockdaemon, dRPC, Validation Cloud) |
-| Public RPC URL | n/a | `https://rpc.mainnet.chain.robinhood.com` |
-| Explorer | Solana explorer | Robinhood Chain Blockscout explorer |
+
+| Concern           | Old (Solana)                              | New (Robinhood Chain)                                                                                    |
+| ----------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Chain type        | Solana L1                                 | EVM, Arbitrum-based L2                                                                                   |
+| Chain ID          | n/a                                       | `4663` (mainnet)                                                                                         |
+| Gas token         | SOL                                       | ETH                                                                                                      |
+| Chain client      | `@solana/web3.js`                         | `viem`                                                                                                   |
+| Wallet stack      | Solana Wallet Adapter (Phantom, Solflare) | `wagmi` + `RainbowKit`                                                                                   |
+| Supported wallets | Phantom, Solflare                         | MetaMask, WalletConnect, Coinbase Wallet, Rabby, and other RainbowKit-supported connectors               |
+| Swap engine       | Jupiter quote/swap API                    | Direct on-chain calls to a Uniswap-style Router/Quoter contract                                          |
+| Token identifier  | `mint` address                            | `contract address` (ERC-20)                                                                              |
+| RPC               | Solana RPC endpoint                       | Robinhood Chain RPC (recommended provider: Alchemy; also QuickNode, Blockdaemon, dRPC, Validation Cloud) |
+| Public RPC URL    | n/a                                       | `https://rpc.mainnet.chain.robinhood.com`                                                                |
+| Explorer          | Solana explorer                           | Robinhood Chain Blockscout explorer                                                                      |
 
 ### Wallet Connection
+
 - Library: `wagmi` for state/hooks, `RainbowKit` for the connect modal/UI
 - MetaMask is a first-class supported connector, alongside WalletConnect, Coinbase Wallet, and others RainbowKit ships by default
 - Network add/switch flow should use `wallet_addEthereumChain` under the hood (RainbowKit handles this) so users on the wrong network get prompted to add/switch to Robinhood Chain automatically
 - No more `PhantomWalletAdapter` / `SolflareWalletAdapter` — remove entirely
 
 ### Swap Engine (Direct Router Calls)
+
 - Replace all Jupiter quote/swap/route logic with direct calls to a Uniswap-style Router and Quoter contract deployed on Robinhood Chain
 - Quote fetching: call the Quoter contract's `quoteExactInputSingle` (or equivalent) directly via `viem`, no external aggregator API
 - Swap execution: build and submit a transaction to the Router contract's `exactInputSingle` / `swapExactTokensForTokens` (or equivalent) method, signed via the connected wallet
@@ -54,6 +61,7 @@ The dapp provides a premium trading terminal experience for Robinhood Chain user
 - Route "hops" (if supporting multi-hop) should be encoded manually via the router's path encoding, not fetched from an aggregator
 
 ## Tech Stack
+
 - Framework: Next.js 15
 - UI: React 19
 - Language: TypeScript
@@ -67,12 +75,14 @@ The dapp provides a premium trading terminal experience for Robinhood Chain user
 - Voice input: browser Web Speech API
 
 ## Metadata And Branding
+
 - App title: `Oraculum`
 - Description: `Voice-assisted Robinhood Chain trading terminal with live wallet, market, quote, and execution flows.`
 - Root metadata file: `app/layout.tsx`
 - Current app icon: `public/oraculum-icon.svg` (to be redesigned to match new dark fintech visual language)
 
 ## High-Level Architecture
+
 ```mermaid
 flowchart LR
   A["Next.js App Router UI"] --> B["Client Hooks + Query Layer"]
@@ -85,6 +95,7 @@ flowchart LR
 ```
 
 ## Main User Flows
+
 1. User opens the app and connects a wallet (MetaMask or other EVM wallet via RainbowKit).
 2. If on the wrong network, the app prompts the user to add/switch to Robinhood Chain.
 3. Wallet balances, portfolio summary, markets, and history are loaded from API routes.
@@ -95,21 +106,26 @@ flowchart LR
 8. The app tracks the submitted transaction hash and stores execution state locally.
 
 ## App Providers
+
 The global providers live in `src/components/providers/app-providers.tsx`.
 
 They configure:
+
 - `WagmiProvider` for Robinhood Chain connection state
 - `RainbowKitProvider` for wallet connect UI (MetaMask, WalletConnect, Coinbase Wallet, etc.)
 - `QueryClientProvider` for TanStack Query
 - `Toaster` for notifications
 
 RPC default source:
+
 - `DEFAULT_RPC_URL` from `src/lib/constants.ts` (Robinhood Chain RPC, e.g. Alchemy endpoint)
 
 ## App Routes
+
 The main app pages live under `app/`. Route structure is unchanged.
 
 ### Pages
+
 - `/` -> home swap dashboard
 - `/portfolio` -> portfolio overview
 - `/markets` -> market overview
@@ -119,31 +135,39 @@ The main app pages live under `app/`. Route structure is unchanged.
 - `/settings` -> trading and app settings
 
 ### Navigation Source
+
 Navigation items are defined in `src/lib/nav.ts`.
 
 ## API Routes
+
 The server-side API routes live under `app/api/`. Route structure is unchanged; internals now call Robinhood Chain RPC / contracts instead of Solana RPC / Jupiter.
 
 ### Wallet
+
 - `/api/wallet/balances`
 - `/api/wallet/portfolio`
 - `/api/wallet/history`
 
 ### Markets
+
 - `/api/markets/list`
 
 ### Trading
+
 - `/api/quote` — now calls the Quoter contract directly via `viem`
 - `/api/swap` — now builds a Router contract transaction
 - `/api/execute/track` — now tracks EVM transaction hash + confirmations instead of a Solana signature
 
 ### Voice
+
 - `/api/voice/parse`
 
 ## State Management
+
 The main client store is `src/store/oraculum-store.ts`. Shape is unchanged.
 
 ### Persisted State
+
 - `swapInputMint` → conceptually becomes `swapInputToken` (ERC-20 contract address)
 - `swapOutputMint` → `swapOutputToken` (ERC-20 contract address)
 - `swapAmount`
@@ -153,6 +177,7 @@ The main client store is `src/store/oraculum-store.ts`. Shape is unchanged.
 - `executions`
 
 ### Core Store Actions
+
 - `setSwapPair(inputToken, outputToken)`
 - `setSwapAmount(amount)`
 - `setSlippage(slippageBps)`
@@ -161,6 +186,7 @@ The main client store is `src/store/oraculum-store.ts`. Shape is unchanged.
 - `upsertExecution(execution)`
 
 ### Default Swap State
+
 - input token: ETH
 - output token: USDC (bridged/native to Robinhood Chain)
 - amount: `1`
@@ -168,9 +194,11 @@ The main client store is `src/store/oraculum-store.ts`. Shape is unchanged.
 - priority fee: `auto`
 
 ## Query Layer
+
 Client data hooks are implemented in `src/hooks/use-oraculum-data.ts`. Hook names/behavior unchanged.
 
 ### Hooks
+
 - `useMarkets()`
 - `useWalletBalances(walletAddress)`
 - `usePortfolio(walletAddress)`
@@ -178,38 +206,49 @@ Client data hooks are implemented in `src/hooks/use-oraculum-data.ts`. Hook name
 - `useQuote(request)` — now sources quotes from direct Quoter contract reads
 
 ### Behavior
+
 - market queries refresh every 30 seconds
 - wallet and portfolio queries refresh every 20 seconds
 - quotes refresh aggressively for trading UX
 
 ## Main UI Composition
+
 The page composition lives in `src/components/pages/app-pages.tsx`. Page responsibilities unchanged; visual design changes (see Design Language section).
 
 ### Home Page
+
 The home screen is `SwapHomePage()`. Shows top protocol header, live stat grid, `VoiceButton`, `SwapCard`.
 
 ### Portfolio Page
+
 Wallet summary cards, asset allocation, top movers.
 
 ### Markets Page
+
 Tracked token market rows, pair detail and liquidity context.
 
 ### Orders Page
+
 Execution states, submitted and tracked swap records.
 
 ### History Page
+
 Wallet transaction activity, app execution ledger.
 
 ### Voice Page
+
 Microphone input, transcript editing, parsed intent fields, handoff to swap terminal.
 
 ### Settings Page
+
 Swap pair defaults, slippage, priority fee preferences, wallet and network display settings.
 
 ## Swap System
+
 The main swap UI lives in `src/components/swap/swap-card.tsx`.
 
 ### Swap Card Responsibilities
+
 - reads current swap pair and amount from Zustand
 - loads token balances and market data
 - requests a live quote directly from the Quoter contract via `/api/quote`
@@ -224,22 +263,28 @@ The main swap UI lives in `src/components/swap/swap-card.tsx`.
 - tracks status through `/api/execute/track` by polling transaction receipt/confirmations
 
 ### Swap Direction
+
 The card uses:
+
 - `swapInputToken` for `You Pay`
 - `swapOutputToken` for `You Receive`
 
 This is important for voice flow because parsed symbols must correctly map to:
+
 - input token -> `You Pay`
 - output token -> `You Receive`
 
 ## Voice System
+
 The voice feature uses:
+
 - `src/hooks/use-speech-recognition.ts`
 - `src/components/voice/voice-button.tsx`
 - `app/api/voice/parse/route.ts`
 - `src/lib/server/voice.ts`
 
 ### How Voice Works
+
 1. User taps the microphone.
 2. Browser Web Speech API captures speech and returns transcript text.
 3. Transcript is shown in the UI.
@@ -252,13 +297,16 @@ The voice feature uses:
 7. The swap card updates automatically if both symbols map correctly.
 
 ### Voice UI Entry Points
+
 - Home widget: `src/components/voice/voice-button.tsx`
 - Full console: `VoiceRoutePage()` in `src/components/pages/app-pages.tsx`
 
 ### Voice Parsing
+
 Voice parsing is rule-based in `src/lib/server/voice.ts`.
 
 Supported actions:
+
 - `swap`
 - `buy`
 - `sell`
@@ -267,18 +315,22 @@ Supported actions:
 - `unknown`
 
 ### Voice Alias Handling
+
 The parser normalizes spoken names into trade symbols. Aliases update to reflect the new token set, e.g.:
+
 - `ethereum` -> `ETH`
 - `usd` -> `USDC`
 - `usd coin` -> `USDC`
 - (Solana-specific aliases like `solana`/`sulana` -> `SOL` and `jupiter` -> `JUP` are removed)
 
 ### Current Voice Safety Model
+
 - no blind auto-execution
 - user must still review the swap
 - wallet signature remains manual
 
 ## Trading Execution Flow
+
 ```mermaid
 flowchart TD
   A["Select pair or speak command"] --> B["Update swap store"]
@@ -291,9 +343,11 @@ flowchart TD
 ```
 
 ## Main Data Types
+
 The shared dapp types live in `src/types/dapp.ts`. Types are renamed/reshaped for EVM:
 
 ### Important Types
+
 - `WalletBalance` — now keyed by ERC-20 contract address instead of mint
 - `PortfolioSummary`
 - `MarketRow`
@@ -305,15 +359,18 @@ The shared dapp types live in `src/types/dapp.ts`. Types are renamed/reshaped fo
 - `VoiceIntent`
 
 ## Supported Tokens
+
 Tracked token definitions live in `src/lib/constants.ts`.
 
 Core featured tokens include:
+
 - ETH
 - USDC
 - Robinhood Stock Tokens (as available on Robinhood Chain)
 - other ERC-20s as desired
 
 The same constants file also exposes:
+
 - ERC-20 contract addresses
 - `FEATURED_TOKENS`
 - `SYMBOL_TO_ADDRESS` (replaces `SYMBOL_TO_MINT`)
@@ -336,32 +393,40 @@ Replacing the previous "premium editorial / paper background / serif / luxury gr
 This should be applied consistently across all pages (`app-pages.tsx`), the shell (`app-shell.tsx`), the swap card, and the app icon (`public/oraculum-icon.svg` should be redesigned to match).
 
 ## Important Files
+
 ### App Entry
+
 - `app/layout.tsx`
 - `app/page.tsx`
 
 ### UI Pages
+
 - `src/components/pages/app-pages.tsx`
 - `src/components/layout/app-shell.tsx`
 
 ### Swap
+
 - `src/components/swap/swap-card.tsx`
 
 ### Voice
+
 - `src/components/voice/voice-button.tsx`
 - `src/hooks/use-speech-recognition.ts`
 - `src/lib/server/voice.ts`
 - `app/api/voice/parse/route.ts`
 
 ### State And Data
+
 - `src/store/oraculum-store.ts`
 - `src/hooks/use-oraculum-data.ts`
 - `src/types/dapp.ts`
 
 ### Providers
+
 - `src/components/providers/app-providers.tsx`
 
 ## Notes
+
 - The active runtime app is the Next.js `app/` implementation.
 - There are older TanStack Router files in `src/routes/`, but the main dapp flow is represented by the Next.js pages and route handlers.
 - Voice recognition depends on browser support for `SpeechRecognition` or `webkitSpeechRecognition`.
@@ -369,4 +434,5 @@ This should be applied consistently across all pages (`app-pages.tsx`), the shel
 - Robinhood Chain reference: Chain ID `4663`, EVM/Arbitrum L2, ETH gas token, recommended RPC provider Alchemy (also QuickNode, Blockdaemon, dRPC, Validation Cloud). Docs: https://docs.robinhood.com/chain/connecting/
 
 ## One-Line Description
+
 Oraculum is a voice-assisted Robinhood Chain swap terminal that combines EVM wallet connectivity (MetaMask and others), live market/portfolio data, direct on-chain DEX router trading, and a dark, minimal fintech dashboard UI in one Next.js dapp.
