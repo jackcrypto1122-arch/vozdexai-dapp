@@ -59,7 +59,9 @@ export function SwapCard() {
     const byAddress = new Map<string, TokenChoice>();
 
     for (const token of tokenOptions) {
-      const market = markets.find((row) => row.address.toLowerCase() === token.address.toLowerCase());
+      const market = markets.find(
+        (row) => row.address.toLowerCase() === token.address.toLowerCase(),
+      );
       byAddress.set(token.address.toLowerCase(), {
         address: token.address,
         symbol: token.symbol,
@@ -87,9 +89,13 @@ export function SwapCard() {
     return Array.from(byAddress.values());
   }, [balances, markets, tokenOptions]);
 
-  const inputToken = tokens.find((token) => token.address.toLowerCase() === swapInputAddress.toLowerCase()) ?? tokens[0];
+  const inputToken =
+    tokens.find((token) => token.address.toLowerCase() === swapInputAddress.toLowerCase()) ??
+    tokens[0];
   const outputToken =
-    tokens.find((token) => token.address.toLowerCase() === swapOutputAddress.toLowerCase()) ?? tokens[1] ?? tokens[0];
+    tokens.find((token) => token.address.toLowerCase() === swapOutputAddress.toLowerCase()) ??
+    tokens[1] ??
+    tokens[0];
 
   // ── Enforce: one side must always be ETH/WETH ──
   const isEthLike = (addr: string) =>
@@ -120,17 +126,17 @@ export function SwapCard() {
   const amountNumber = Number.parseFloat(swapAmount || "0");
   const quoteRequest =
     isConnected &&
-      inputToken &&
-      outputToken &&
-      amountNumber > 0 &&
-      inputToken.address !== outputToken.address
+    inputToken &&
+    outputToken &&
+    amountNumber > 0 &&
+    inputToken.address !== outputToken.address
       ? {
-        inputAddress: inputToken.address,
-        outputAddress: outputToken.address,
-        amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
-        slippageBps,
-        walletAddress: walletAddress!,
-      }
+          inputAddress: inputToken.address,
+          outputAddress: outputToken.address,
+          amountRaw: parseUnits(swapAmount, inputToken.decimals).toString(),
+          slippageBps,
+          walletAddress: walletAddress!,
+        }
       : null;
 
   const {
@@ -143,14 +149,14 @@ export function SwapCard() {
   const receiveAmount =
     quote && outputToken
       ? formatAmount(
-        Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)),
-        6,
-      )
+          Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)),
+          6,
+        )
       : "0";
   const rate =
     quote && inputToken && outputToken && amountNumber > 0
       ? Number.parseFloat(formatUnits(BigInt(quote.outAmountRaw), outputToken.decimals)) /
-      amountNumber
+        amountNumber
       : null;
 
   useEffect(() => {
@@ -245,12 +251,12 @@ export function SwapCard() {
 
     let permit2Permit:
       | {
-        amount: string;
-        expiration: number;
-        nonce: number;
-        sigDeadline: string;
-        signature: string;
-      }
+          amount: string;
+          expiration: number;
+          nonce: number;
+          sigDeadline: string;
+          signature: string;
+        }
       | undefined;
 
     const requestSwap = async () => {
