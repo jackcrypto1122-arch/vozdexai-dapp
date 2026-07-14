@@ -29,7 +29,7 @@ export const useOraculumStore = create<OraculumState>()(
       swapInputAddress: ETH_ADDRESS,
       swapOutputAddress: ARROW_ADDRESS,
       swapAmount: "1",
-      slippageBps: 50,
+      slippageBps: 250,
       priorityFee: "auto",
       executions: [],
       customTokens: [],
@@ -58,6 +58,11 @@ export const useOraculumStore = create<OraculumState>()(
     }),
     {
       name: "oraculum-state",
+      version: 1,
+      migrate: (persistedState, version) => {
+        const state = persistedState as OraculumState;
+        return version < 1 && state.slippageBps === 50 ? { ...state, slippageBps: 250 } : state;
+      },
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         swapInputAddress: state.swapInputAddress,

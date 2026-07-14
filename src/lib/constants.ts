@@ -6,6 +6,11 @@ export const DEFAULT_EXPLORER = "https://robinhoodchain.blockscout.com";
 
 // Token addresses
 export const ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"; // Native ETH
+export const V4_QUOTER_ADDRESS = "0x8dc178efb8111bb0973dd9d722ebeff267c98f94";
+export const V4_POOL_MANAGER_ADDRESS = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
+export const V2_ROUTER_ADDRESS = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba";
+export const V3_FACTORY_ADDRESS = "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA";
+export const V3_QUOTER_ADDRESS = "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7";
 export const USDC_ADDRESS = "0x3884564BA51B349e7661c7e28Ad947DEE327FeDF";
 export const RH_ADDRESS = "0x..."; // Placeholder for Robinhood token if available
 export const WETH_ADDRESS = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
@@ -48,7 +53,16 @@ export const FEATURED_TOKENS = [
     dexVersion: "v3",
     feeTier: 3000,
   },
-  { address: ARROW_ADDRESS, symbol: "ARROW", name: "Arrow", decimals: 18, dexVersion: "v2" },
+  {
+    address: ARROW_ADDRESS,
+    symbol: "ARROW",
+    name: "Arrow",
+    decimals: 18,
+    dexVersion: "v4",
+    feeTier: 10000,
+    tickSpacing: 200,
+    hooks: "0x0000000000000000000000000000000000000000",
+  },
   {
     address: CASHCAT_ADDRESS,
     symbol: "CASHCAT",

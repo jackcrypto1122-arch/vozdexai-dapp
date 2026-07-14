@@ -1,11 +1,13 @@
 import {
   createPublicClient,
   http,
-  parseUnits,
   formatUnits,
   encodeFunctionData,
   encodeAbiParameters,
+  concatHex,
   encodePacked,
+  parseAbi,
+  parseAbiItem,
   parseAbiParameters,
   type Chain,
   type Hex,
@@ -16,7 +18,12 @@ import {
   USDC_ADDRESS,
   FEATURED_TOKENS,
   UNIVERSAL_ROUTER_ADDRESS,
-  UNISWAP_V3_FEE_TIER,
+  V4_QUOTER_ADDRESS,
+  V4_POOL_MANAGER_ADDRESS,
+  V2_ROUTER_ADDRESS,
+  V3_FACTORY_ADDRESS,
+  V3_QUOTER_ADDRESS,
+  PERMIT2_ADDRESS,
   ROBINHOOD_CHAIN_ID,
   WETH_ADDRESS,
   normalizeTokenAddress,
@@ -91,90 +98,384 @@ const ERC20_ABI = [
 ] as const;
 
 // ─── Universal Router command bytes ───
-const CMD_V4_SWAP = 0x10;
-const CMD_WRAP_ETH = 0x0b;
-const CMD_UNWRAP_WETH = 0x0c;
-
-// ─── V4 Actions ───
-const V4_SWAP_EXACT_IN_SINGLE = "0x07";
-const V4_SETTLE = "0x0b";
-const V4_TAKE = "0x0e";
-
-// ─── V4 ABIs ───
-// We do not use V4_EXACT_IN_ABI because Robinhood Chain Universal Router has an older/nonstandard
-// layout for Param 0 (with 4 extra hex words). We use dynamic hex string templating instead.
-
+const NATIVE_ETH_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
+const V4_SWAP_COMMAND = "0x10" as Hex;
+const V4_ACTIONS = "0x070b0e" as Hex;
+const V4_QUOTER_ABI = parseAbi([
+  "function quoteExactInput((address exactCurrency,(address intermediateCurrency,uint24 fee,int24 tickSpacing,address hooks,bytes hookData)[] path,uint128 exactAmount) params) returns (uint256 amountOut,uint256 gasEstimate)",
+]);
+const V4_EXACT_IN_ABI = parseAbiParameters(
+  "(address currencyIn, (address intermediateCurrency, uint24 fee, int24 tickSpacing, address hooks, bytes hookData)[] path, uint256[] minHopPriceX36, uint128 amountIn, uint128 amountOutMinimum) params",
+);
 const V4_SETTLE_ABI = parseAbiParameters("address currency, uint256 amount, bool payerIsUser");
 const V4_TAKE_ABI = parseAbiParameters("address currency, address recipient, uint256 amount");
 const V4_WRAPPER_ABI = parseAbiParameters("bytes actions, bytes[] params");
+const ROUTER_ADDRESS_THIS = "0x0000000000000000000000000000000000000002" as const;
+const WRAP_UNWRAP_ABI = parseAbiParameters("address recipient, uint256 amount");
+const V2_SWAP_EXACT_IN_ABI = parseAbiParameters(
+  "address recipient, uint256 amountIn, uint256 amountOutMinimum, address[] path, bool payerIsUser, uint256[] minHopPriceX36",
+);
+const V3_SWAP_EXACT_IN_ABI = parseAbiParameters(
+  "address recipient, uint256 amountIn, uint256 amountOutMinimum, bytes path, bool payerIsUser, uint256[] minHopPriceX36",
+);
+const PERMIT2_PERMIT_COMMAND = "0x0a" as Hex;
+const PERMIT2_PERMIT_INPUT_ABI = parseAbiParameters(
+  "((address token,uint160 amount,uint48 expiration,uint48 nonce) details,address spender,uint256 sigDeadline) permitSingle, bytes signature",
+);
+const MAX_UINT160 = (1n << 160n) - 1n;
+const MAX_UINT48 = Number((1n << 48n) - 1n);
+const PERMIT2_ABI = [
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "token", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [
+      { name: "amount", type: "uint160" },
+      { name: "expiration", type: "uint48" },
+      { name: "nonce", type: "uint48" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+const V2_ROUTER_ABI = parseAbi([
+  "function getAmountsOut(uint256 amountIn,address[] path) view returns (uint256[] amounts)",
+]);
+const V3_QUOTER_ABI = parseAbi([
+  "function quoteExactInput(bytes path,uint256 amountIn) returns (uint256 amountOut,uint160[] sqrtPriceX96AfterList,uint32[] initializedTicksCrossedList,uint256 gasEstimate)",
+]);
+const V3_POOL_CREATED_EVENT = parseAbiItem(
+  "event PoolCreated(address indexed token0,address indexed token1,uint24 indexed fee,int24 tickSpacing,address pool)",
+);
+const V4_POOL_INITIALIZE_EVENT = parseAbiItem(
+  "event Initialize(bytes32 indexed id,address indexed currency0,address indexed currency1,uint24 fee,int24 tickSpacing,address hooks,uint160 sqrtPriceX96,int24 tick)",
+);
 
+type EvmAddress = `0x${string}`;
+
+type V2Route = {
+  protocol: "v2";
+  amountOut: bigint;
+  tokens: EvmAddress[];
+};
+
+type V3Route = {
+  protocol: "v3";
+  amountOut: bigint;
+  tokens: EvmAddress[];
+  fees: number[];
+};
+
+type V4PathKey = {
+  intermediateCurrency: EvmAddress;
+  fee: number;
+  tickSpacing: number;
+  hooks: EvmAddress;
+  hookData: Hex;
+};
+
+type V4PoolKey = Omit<V4PathKey, "intermediateCurrency" | "hookData">;
+
+type V4Route = {
+  protocol: "v4";
+  amountOut: bigint;
+  currencyIn: EvmAddress;
+  path: V4PathKey[];
+};
+
+type ResolvedSwapRoute = V2Route | V3Route | V4Route;
+
+const swapRouteCache = new Map<string, { expiresAt: number; route: Promise<ResolvedSwapRoute> }>();
+
+function sortPair(left: EvmAddress, right: EvmAddress): [EvmAddress, EvmAddress] {
+  return BigInt(left) < BigInt(right) ? [left, right] : [right, left];
+}
+
+function encodeV3Path(tokens: EvmAddress[], fees: number[]): Hex {
+  let path = tokens[0] as Hex;
+  for (let index = 0; index < fees.length; index += 1) {
+    path = concatHex([path, encodePacked(["uint24", "address"], [fees[index], tokens[index + 1]])]);
+  }
+  return path;
+}
+
+async function quoteV2Routes(
+  amountIn: bigint,
+  wrappedIn: EvmAddress,
+  wrappedOut: EvmAddress,
+): Promise<V2Route[]> {
+  const publicClient = getPublicClient();
+  const paths: EvmAddress[][] = [[wrappedIn, wrappedOut]];
+  if (
+    wrappedIn.toLowerCase() !== USDC_ADDRESS.toLowerCase() &&
+    wrappedOut.toLowerCase() !== USDC_ADDRESS.toLowerCase()
+  ) {
+    paths.push([wrappedIn, USDC_ADDRESS as EvmAddress, wrappedOut]);
+  }
+
+  const routes = await Promise.all(
+    paths.map(async (tokens): Promise<V2Route | undefined> => {
+      try {
+        const amounts = await publicClient.readContract({
+          address: V2_ROUTER_ADDRESS,
+          abi: V2_ROUTER_ABI,
+          functionName: "getAmountsOut",
+          args: [amountIn, tokens],
+        });
+        const amountOut = amounts.at(-1);
+        return amountOut && amountOut > 0n ? { protocol: "v2", amountOut, tokens } : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return routes.filter((route): route is V2Route => Boolean(route));
+}
+
+async function findV3Fees(tokenA: EvmAddress, tokenB: EvmAddress): Promise<number[]> {
+  const publicClient = getPublicClient();
+  const [token0, token1] = sortPair(tokenA, tokenB);
+  try {
+    const logs = await publicClient.getLogs({
+      address: V3_FACTORY_ADDRESS,
+      event: V3_POOL_CREATED_EVENT,
+      args: { token0, token1 },
+      fromBlock: 0n,
+      toBlock: "latest",
+    });
+    return [...new Set(logs.map((log) => log.args.fee).filter((fee) => fee != null))];
+  } catch {
+    return [];
+  }
+}
+
+async function quoteV3Routes(
+  amountIn: bigint,
+  wrappedIn: EvmAddress,
+  wrappedOut: EvmAddress,
+): Promise<V3Route[]> {
+  const tokenPaths: EvmAddress[][] = [[wrappedIn, wrappedOut]];
+  if (
+    wrappedIn.toLowerCase() !== USDC_ADDRESS.toLowerCase() &&
+    wrappedOut.toLowerCase() !== USDC_ADDRESS.toLowerCase()
+  ) {
+    tokenPaths.push([wrappedIn, USDC_ADDRESS as EvmAddress, wrappedOut]);
+  }
+
+  const publicClient = getPublicClient();
+  const routeCandidates: Array<{ tokens: EvmAddress[]; fees: number[] }> = [];
+  for (const tokens of tokenPaths) {
+    const feesByHop = await Promise.all(
+      tokens.slice(0, -1).map((token, index) => findV3Fees(token, tokens[index + 1])),
+    );
+    if (feesByHop.some((fees) => fees.length === 0)) continue;
+
+    let combinations: number[][] = [[]];
+    for (const fees of feesByHop) {
+      combinations = combinations.flatMap((combination) =>
+        fees.map((fee) => [...combination, fee]),
+      );
+    }
+    for (const fees of combinations.slice(0, 36)) routeCandidates.push({ tokens, fees });
+  }
+
+  const routes = await Promise.all(
+    routeCandidates.map(async ({ tokens, fees }): Promise<V3Route | undefined> => {
+      try {
+        const { result } = await publicClient.simulateContract({
+          address: V3_QUOTER_ADDRESS,
+          abi: V3_QUOTER_ABI,
+          functionName: "quoteExactInput",
+          args: [encodeV3Path(tokens, fees), amountIn],
+        });
+        return result[0] > 0n ? { protocol: "v3", amountOut: result[0], tokens, fees } : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return routes.filter((route): route is V3Route => Boolean(route));
+}
+
+async function findV4Pools(currencyA: EvmAddress, currencyB: EvmAddress): Promise<V4PoolKey[]> {
+  const publicClient = getPublicClient();
+  const [currency0, currency1] = sortPair(currencyA, currencyB);
+  try {
+    const logs = await publicClient.getLogs({
+      address: V4_POOL_MANAGER_ADDRESS,
+      event: V4_POOL_INITIALIZE_EVENT,
+      args: { currency0, currency1 },
+      fromBlock: 0n,
+      toBlock: "latest",
+    });
+    return logs
+      .map((log) => ({
+        fee: log.args.fee,
+        tickSpacing: log.args.tickSpacing,
+        hooks: log.args.hooks,
+      }))
+      .filter(
+        (
+          pool,
+        ): pool is {
+          fee: number;
+          tickSpacing: number;
+          hooks: EvmAddress;
+        } => pool.fee != null && pool.tickSpacing != null && Boolean(pool.hooks),
+      );
+  } catch {
+    return [];
+  }
+}
+
+async function quoteV4Routes(
+  request: QuoteRequest,
+  tokenIn: EvmAddress,
+  tokenOut: EvmAddress,
+): Promise<V4Route[]> {
+  const isNativeIn = tokenIn.toLowerCase() === ETH_ADDRESS.toLowerCase();
+  const currencyIn = isNativeIn ? NATIVE_ETH_ADDRESS : tokenIn;
+  const currencyOut =
+    tokenOut.toLowerCase() === ETH_ADDRESS.toLowerCase() ? NATIVE_ETH_ADDRESS : tokenOut;
+  const currencyPaths: EvmAddress[][] = [[currencyIn, currencyOut]];
+  if (
+    currencyIn.toLowerCase() !== USDC_ADDRESS.toLowerCase() &&
+    currencyOut.toLowerCase() !== USDC_ADDRESS.toLowerCase()
+  ) {
+    currencyPaths.push([currencyIn, USDC_ADDRESS as EvmAddress, currencyOut]);
+  }
+
+  const routeCandidates: V4PathKey[][] = [];
+  for (const currencies of currencyPaths) {
+    const poolsByHop = await Promise.all(
+      currencies
+        .slice(0, -1)
+        .map((currency, index) => findV4Pools(currency, currencies[index + 1])),
+    );
+    if (poolsByHop.some((pools) => pools.length === 0)) continue;
+
+    let combinations: V4PoolKey[][] = [[]];
+    for (const pools of poolsByHop) {
+      combinations = combinations.flatMap((combination) =>
+        pools.map((pool) => [...combination, pool]),
+      );
+    }
+    for (const combination of combinations.slice(0, 36)) {
+      routeCandidates.push(
+        combination.map((pool, index) => ({
+          intermediateCurrency: currencies[index + 1],
+          fee: pool.fee,
+          tickSpacing: pool.tickSpacing,
+          hooks: pool.hooks,
+          hookData: "0x",
+        })),
+      );
+    }
+  }
+
+  const publicClient = getPublicClient();
+  const routes = await Promise.all(
+    routeCandidates.map(async (path): Promise<V4Route | undefined> => {
+      try {
+        const { result } = await publicClient.simulateContract({
+          account: request.walletAddress as EvmAddress,
+          address: V4_QUOTER_ADDRESS,
+          abi: V4_QUOTER_ABI,
+          functionName: "quoteExactInput",
+          args: [
+            {
+              exactCurrency: currencyIn,
+              path,
+              exactAmount: BigInt(request.amountRaw),
+            },
+          ],
+        });
+        return result[0] > 0n
+          ? { protocol: "v4", amountOut: result[0], currencyIn, path }
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return routes.filter((route): route is V4Route => Boolean(route));
+}
+async function discoverBestRoute(
+  request: QuoteRequest,
+  tokenIn: EvmAddress,
+  tokenOut: EvmAddress,
+): Promise<ResolvedSwapRoute> {
+  const isNativeIn = tokenIn.toLowerCase() === ETH_ADDRESS.toLowerCase();
+  const isNativeOut = tokenOut.toLowerCase() === ETH_ADDRESS.toLowerCase();
+  if (isNativeIn === isNativeOut) {
+    throw new Error("RPC routing currently requires exactly one native ETH side.");
+  }
+
+  const amountIn = BigInt(request.amountRaw);
+  const wrappedIn = isNativeIn ? (WETH_ADDRESS as EvmAddress) : tokenIn;
+  const wrappedOut = isNativeOut ? (WETH_ADDRESS as EvmAddress) : tokenOut;
+  const routeGroups = await Promise.all([
+    quoteV2Routes(amountIn, wrappedIn, wrappedOut),
+    quoteV3Routes(amountIn, wrappedIn, wrappedOut),
+    quoteV4Routes(request, tokenIn, tokenOut),
+  ]);
+  const routes = routeGroups
+    .flat()
+    .sort((left, right) =>
+      left.amountOut === right.amountOut ? 0 : left.amountOut > right.amountOut ? -1 : 1,
+    );
+  if (!routes[0]) {
+    throw new Error("No executable V2, V3, or V4 route with sufficient liquidity was found.");
+  }
+  return routes[0];
+}
+
+async function resolveBestRoute(
+  request: QuoteRequest,
+  tokenIn: EvmAddress,
+  tokenOut: EvmAddress,
+): Promise<ResolvedSwapRoute> {
+  const key = [
+    tokenIn.toLowerCase(),
+    tokenOut.toLowerCase(),
+    request.amountRaw,
+    request.walletAddress.toLowerCase(),
+  ].join(":");
+  const cached = swapRouteCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.route;
+
+  const route = discoverBestRoute(request, tokenIn, tokenOut);
+  swapRouteCache.set(key, { expiresAt: Date.now() + 15_000, route });
+  try {
+    return await route;
+  } catch (error) {
+    swapRouteCache.delete(key);
+    throw error;
+  }
+}
 export async function getQuote(request: QuoteRequest): Promise<QuoteResponse> {
   const inputMetadata = await resolveTokenMetadata(request.inputAddress);
   const outputMetadata = await resolveTokenMetadata(request.outputAddress);
   const tokenIn = inputMetadata.token.address as `0x${string}`;
   const tokenOut = outputMetadata.token.address as `0x${string}`;
-  const amountIn = BigInt(request.amountRaw);
-
-  // Get token info
-  const tokenInInfo =
-    FEATURED_TOKENS.find((t) => t.address.toLowerCase() === tokenIn.toLowerCase()) ??
-    inputMetadata.token;
   const tokenOutInfo =
-    FEATURED_TOKENS.find((t) => t.address.toLowerCase() === tokenOut.toLowerCase()) ??
+    FEATURED_TOKENS.find((token) => token.address.toLowerCase() === tokenOut.toLowerCase()) ??
     outputMetadata.token;
-  const decimalsIn = tokenInInfo?.decimals ?? 18;
-  const decimalsOut = tokenOutInfo?.decimals ?? 18;
-
-  let amountOut: bigint;
-  try {
-    if (tokenIn.toLowerCase() === tokenOut.toLowerCase()) {
-      amountOut = amountIn;
-    } else {
-      const livePrices = await getDexScreenerPrices([
-        { address: tokenIn, symbol: tokenInInfo?.symbol ?? "IN" },
-        { address: tokenOut, symbol: tokenOutInfo?.symbol ?? "OUT" },
-      ]);
-
-      const amountInUi = Number(formatUnits(amountIn, decimalsIn));
-      const inPriceUsd = livePrices[tokenIn.toLowerCase()]?.usd || 0;
-      const outPriceUsd = livePrices[tokenOut.toLowerCase()]?.usd || 0;
-
-      if (!inPriceUsd || !outPriceUsd) {
-        throw new Error("Live pricing is unavailable for the selected pair.");
-      }
-
-      const amountOutUi = (amountInUi * inPriceUsd) / outPriceUsd;
-      amountOut = parseUnits(amountOutUi.toFixed(decimalsOut), decimalsOut);
-    }
-  } catch {
-    // Fallback mock if anything fails
-    const MOCK_PRICES: Record<string, number> = {
-      WETH: 3500,
-      USDC: 1,
-      ARROW: 1.43,
-      CASHCAT: 0.1655,
-      HOODRAT: 0.01346,
-      JUGGERNAUT: 0.01284,
-    };
-
-    const amountInUi = Number(formatUnits(amountIn, decimalsIn));
-    const inPriceUsd = tokenInInfo?.symbol ? (MOCK_PRICES[tokenInInfo.symbol] ?? 1) : 1;
-    const outPriceUsd = tokenOutInfo?.symbol ? (MOCK_PRICES[tokenOutInfo.symbol] ?? 1) : 1;
-    const amountOutUi = (amountInUi * inPriceUsd) / outPriceUsd;
-    amountOut = parseUnits(amountOutUi.toFixed(decimalsOut), decimalsOut);
-  }
+  const route = await resolveBestRoute(request, tokenIn, tokenOut);
 
   return {
     inputAddress: tokenIn,
     outputAddress: tokenOut,
     inAmountRaw: request.amountRaw,
-    outAmountRaw: amountOut.toString(),
-    outAmountUi: Number(formatUnits(amountOut, decimalsOut)),
-    priceImpactPct: 0.1, // Placeholder
-    estimatedGas: "21000", // Placeholder
+    outAmountRaw: route.amountOut.toString(),
+    outAmountUi: Number(formatUnits(route.amountOut, tokenOutInfo?.decimals ?? 18)),
+    priceImpactPct: 0,
+    estimatedGas: null,
   };
 }
-
 export async function buildSwap(request: QuoteRequest): Promise<SwapBuildResponse> {
   const quote = await getQuote(request);
   const inputMetadata = await resolveTokenMetadata(request.inputAddress);
@@ -182,93 +483,157 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
   const tokenIn = inputMetadata.token.address as `0x${string}`;
   const tokenOut = outputMetadata.token.address as `0x${string}`;
   const amountIn = BigInt(request.amountRaw);
-  const slippageMultiplier = BigInt(10000 - request.slippageBps);
-  const amountOutMinimum = (BigInt(quote.outAmountRaw) * slippageMultiplier) / 10000n;
+  const amountOutMinimum =
+    (BigInt(quote.outAmountRaw) * BigInt(10000 - request.slippageBps)) / 10000n;
   const recipient = request.walletAddress as `0x${string}`;
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
   const isNativeIn = tokenIn.toLowerCase() === ETH_ADDRESS.toLowerCase();
-  const isNativeOut = tokenOut.toLowerCase() === ETH_ADDRESS.toLowerCase();
-
-  // Resolve actual on-chain addresses (native ETH → WETH for on-chain swap)
-  const actualTokenIn = isNativeIn ? (WETH_ADDRESS as `0x${string}`) : tokenIn;
-  const actualTokenOut = isNativeOut ? (WETH_ADDRESS as `0x${string}`) : tokenOut;
-
-  const tokenInInfo =
-    FEATURED_TOKENS.find((t) => t.address.toLowerCase() === tokenIn.toLowerCase()) ??
-    inputMetadata.token;
-  const tokenOutInfo =
-    FEATURED_TOKENS.find((t) => t.address.toLowerCase() === tokenOut.toLowerCase()) ??
-    outputMetadata.token;
-
-  // Find dex configuration for the non-ETH token (which dictates the pool we use)
-  const nonEthTokenInfo = isNativeIn ? tokenOutInfo : tokenInInfo;
-  const feeTier = (nonEthTokenInfo as { feeTier?: number })?.feeTier || 2888;
-  const feeHex = feeTier.toString(16).padStart(64, "0");
-
-  const ROUTER_AS_RECIPIENT = "0x0000000000000000000000000000000000000002" as `0x${string}`;
-
+  const route = await resolveBestRoute(request, tokenIn, tokenOut);
   let commands: Hex;
   let inputs: Hex[];
-  let value = "0";
+  let value = 0n;
 
-  // We use the EXACT hex structure from the successful Robinhood Chain transaction.
-  const pad32 = (hexOrNum: string | bigint | number) => {
-    const raw = typeof hexOrNum === "string" ? hexOrNum.replace("0x", "") : hexOrNum.toString(16);
-    return raw.padStart(64, "0");
-  };
+  if (route.protocol === "v4") {
+    const currencyOut = route.path.at(-1)?.intermediateCurrency;
+    if (!currencyOut) throw new Error("The selected V4 route has no output currency.");
 
-  const encodeV4Payload = (isETHtoToken: boolean) => {
-    const userOrRouter = isETHtoToken ? recipient : ROUTER_AS_RECIPIENT;
-
-    // In our successful struct for Param 0:
-    const p0: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(WETH_ADDRESS)}00000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000001a0${pad32(amountIn)}${pad32(amountOutMinimum)}00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020${pad32(isNativeIn ? actualTokenOut : actualTokenIn)}${feeHex}0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000`;
-
-    const settleToken = isNativeIn ? WETH_ADDRESS : actualTokenIn;
-    const payerIsUserHex = isNativeIn ? "00" : "01";
-    const p1: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(settleToken)}0000000000000000000000000000000000000000000000000000000000000000${payerIsUserHex.padStart(64, "0")}`;
-
-    const takeToken = isNativeIn ? actualTokenOut : WETH_ADDRESS;
-    const takeRecipient = isNativeIn ? recipient : ROUTER_AS_RECIPIENT;
-    const p2: Hex = `0x0000000000000000000000000000000000000000000000000000000000000020${pad32(takeToken)}${pad32(takeRecipient)}0000000000000000000000000000000000000000000000000000000000000000`;
-
-    return encodeAbiParameters(V4_WRAPPER_ABI, [`0x070b0e` as Hex, [p0, p1, p2]]);
-  };
-
-  if (isNativeIn) {
-    // ETH → Token: WRAP_ETH (0x0b) + V4_SWAP (0x10)
-    commands = `0x0b10` as Hex;
-    value = amountIn.toString();
-
-    // WRAP_ETH
-    const wrapInput = encodeAbiParameters(parseAbiParameters("address, uint256"), [
-      ROUTER_AS_RECIPIENT,
-      amountIn,
+    const swapParams = encodeAbiParameters(V4_EXACT_IN_ABI, [
+      {
+        currencyIn: route.currencyIn,
+        path: route.path,
+        minHopPriceX36: [],
+        amountIn,
+        amountOutMinimum,
+      },
     ]);
-
-    const v4Payload = encodeV4Payload(true);
-
-    inputs = [wrapInput, v4Payload];
-  } else if (isNativeOut) {
-    // Token → ETH: V4_SWAP (0x10) + UNWRAP_WETH (0x0c)
-    commands = `0x100c` as Hex;
-
-    const v4Payload = encodeV4Payload(false);
-
-    // UNWRAP_WETH
-    const unwrapInput = encodeAbiParameters(parseAbiParameters("address, uint256"), [
-      recipient,
-      amountOutMinimum,
+    const settleParams = encodeAbiParameters(V4_SETTLE_ABI, [route.currencyIn, 0n, true]);
+    const takeParams = encodeAbiParameters(V4_TAKE_ABI, [currencyOut, recipient, 0n]);
+    const routerInput = encodeAbiParameters(V4_WRAPPER_ABI, [
+      V4_ACTIONS,
+      [swapParams, settleParams, takeParams],
     ]);
-
-    inputs = [v4Payload, unwrapInput];
+    commands = V4_SWAP_COMMAND;
+    inputs = [routerInput];
+    value = isNativeIn ? amountIn : 0n;
   } else {
-    // Token → Token: V4_SWAP (0x10)
-    commands = `0x10` as Hex;
+    const swapRecipient = isNativeIn ? recipient : ROUTER_ADDRESS_THIS;
+    const payerIsUser = !isNativeIn;
 
-    const v4Payload = encodeV4Payload(false);
+    const swapInput =
+      route.protocol === "v2"
+        ? encodeAbiParameters(V2_SWAP_EXACT_IN_ABI, [
+            swapRecipient,
+            amountIn,
+            amountOutMinimum,
+            route.tokens,
+            payerIsUser,
+            [],
+          ])
+        : encodeAbiParameters(V3_SWAP_EXACT_IN_ABI, [
+            swapRecipient,
+            amountIn,
+            amountOutMinimum,
+            encodeV3Path(route.tokens, route.fees),
+            payerIsUser,
+            [],
+          ]);
 
-    inputs = [v4Payload];
+    if (isNativeIn) {
+      commands = route.protocol === "v2" ? "0x0b08" : "0x0b00";
+      inputs = [encodeAbiParameters(WRAP_UNWRAP_ABI, [ROUTER_ADDRESS_THIS, amountIn]), swapInput];
+      value = amountIn;
+    } else {
+      commands = route.protocol === "v2" ? "0x080c" : "0x000c";
+      inputs = [swapInput, encodeAbiParameters(WRAP_UNWRAP_ABI, [recipient, amountOutMinimum])];
+    }
+  }
+
+  const publicClient = getPublicClient();
+
+  let approvalNeeded: SwapBuildResponse["approvalNeeded"];
+  let permit2SignatureNeeded: SwapBuildResponse["permit2SignatureNeeded"];
+  if (!isNativeIn) {
+    const [tokenBalance, tokenAllowance] = await Promise.all([
+      publicClient.readContract({
+        address: tokenIn,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [recipient],
+      }),
+      publicClient.readContract({
+        address: tokenIn,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [recipient, PERMIT2_ADDRESS as `0x${string}`],
+      }),
+    ]);
+
+    if (tokenBalance < amountIn) {
+      throw new Error(
+        `Insufficient ${inputMetadata.token.symbol} balance: available ${formatUnits(tokenBalance, inputMetadata.token.decimals)}, requested ${formatUnits(amountIn, inputMetadata.token.decimals)}.`,
+      );
+    }
+
+    if (tokenAllowance < amountIn) {
+      approvalNeeded = {
+        token: tokenIn,
+        spender: PERMIT2_ADDRESS,
+        kind: "erc20",
+      };
+    } else {
+      const permitAllowance = await publicClient.readContract({
+        address: PERMIT2_ADDRESS as `0x${string}`,
+        abi: PERMIT2_ABI,
+        functionName: "allowance",
+        args: [recipient, tokenIn, UNIVERSAL_ROUTER_ADDRESS as `0x${string}`],
+      });
+      const currentPermitAmount = BigInt(permitAllowance[0]);
+      const currentPermitExpiration = Number(permitAllowance[1]);
+      const currentPermitNonce = Number(permitAllowance[2]);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+
+      if (currentPermitAmount < amountIn || currentPermitExpiration <= nowSeconds + 300) {
+        const suppliedPermit = request.permit2Permit;
+        if (!suppliedPermit) {
+          permit2SignatureNeeded = {
+            token: tokenIn,
+            spender: UNIVERSAL_ROUTER_ADDRESS,
+            amount: MAX_UINT160.toString(),
+            expiration: MAX_UINT48,
+            nonce: currentPermitNonce,
+            sigDeadline: String(nowSeconds + 600),
+          };
+        } else {
+          const suppliedAmount = BigInt(suppliedPermit.amount);
+          const suppliedSigDeadline = BigInt(suppliedPermit.sigDeadline);
+          if (
+            suppliedAmount < amountIn ||
+            suppliedPermit.expiration <= nowSeconds + 300 ||
+            suppliedPermit.nonce !== currentPermitNonce ||
+            suppliedSigDeadline <= BigInt(nowSeconds)
+          ) {
+            throw new Error("The Permit2 signature request expired. Please try Swap again.");
+          }
+
+          const permitInput = encodeAbiParameters(PERMIT2_PERMIT_INPUT_ABI, [
+            {
+              details: {
+                token: tokenIn,
+                amount: suppliedAmount,
+                expiration: suppliedPermit.expiration,
+                nonce: suppliedPermit.nonce,
+              },
+              spender: UNIVERSAL_ROUTER_ADDRESS as `0x${string}`,
+              sigDeadline: suppliedSigDeadline,
+            },
+            suppliedPermit.signature as Hex,
+          ]);
+          commands = concatHex([PERMIT2_PERMIT_COMMAND, commands]);
+          inputs = [permitInput, ...inputs];
+        }
+      }
+    }
   }
 
   const data = encodeFunctionData({
@@ -276,34 +641,31 @@ export async function buildSwap(request: QuoteRequest): Promise<SwapBuildRespons
     functionName: "execute",
     args: [commands, inputs, deadline],
   });
-
-  // ── Check if ERC-20 approval to the Universal Router is needed ──
-  let approvalNeeded: { token: string; spender: string } | undefined;
-  if (!isNativeIn) {
+  let gas = 350000n;
+  if (!approvalNeeded && !permit2SignatureNeeded) {
     try {
-      const publicClient = getPublicClient();
-      const allowance = await publicClient.readContract({
-        address: tokenIn,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [recipient, UNIVERSAL_ROUTER_ADDRESS as `0x${string}`],
+      const estimatedGas = await publicClient.estimateGas({
+        account: recipient,
+        to: UNIVERSAL_ROUTER_ADDRESS as `0x${string}`,
+        data,
+        value,
       });
-      if (allowance < amountIn) {
-        approvalNeeded = { token: tokenIn, spender: UNIVERSAL_ROUTER_ADDRESS };
-      }
-    } catch {
-      // If we can't check, assume approval is needed
-      approvalNeeded = { token: tokenIn, spender: UNIVERSAL_ROUTER_ADDRESS };
+      gas = (estimatedGas * 120n) / 100n;
+      if (gas < 160000n) gas = 160000n;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.split("\n")[0] : "Unknown revert";
+      throw new Error(`Robinhood swap simulation failed: ${reason}`);
     }
   }
 
   return {
     to: UNIVERSAL_ROUTER_ADDRESS,
     data,
-    value,
-    gas: "300000",
-    quote,
+    value: value.toString(),
+    gas: gas.toString(),
+    quote: { ...quote, estimatedGas: gas.toString() },
     approvalNeeded,
+    permit2SignatureNeeded,
   };
 }
 

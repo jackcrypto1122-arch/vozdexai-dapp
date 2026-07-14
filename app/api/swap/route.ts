@@ -15,6 +15,15 @@ const swapSchema = z.object({
   walletAddress: z
     .string()
     .refine((value) => isAddress(value), "Wallet must be a valid EVM address."),
+  permit2Permit: z
+    .object({
+      amount: z.string().regex(/^\d+$/),
+      expiration: z.number().int().nonnegative(),
+      nonce: z.number().int().nonnegative(),
+      sigDeadline: z.string().regex(/^\d+$/),
+      signature: z.string().regex(/^0x[0-9a-fA-F]+$/),
+    })
+    .optional(),
 });
 
 export async function POST(request: Request) {

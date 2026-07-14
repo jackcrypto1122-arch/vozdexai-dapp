@@ -52,7 +52,7 @@ type SettingsState = {
 };
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  slippageBps: 50,
+  slippageBps: 250,
   priorityFee: "auto",
   language: "en",
   setSlippage: (slippageBps) => set({ slippageBps }),

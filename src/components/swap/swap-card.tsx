@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { useAccount, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
+import {
+  useAccount,
+  usePublicClient,
+  useSendTransaction,
+  useSignTypedData,
+  useWaitForTransactionReceipt,
+} from "wagmi";
 import { parseUnits, formatUnits, encodeFunctionData } from "viem";
 import { ArrowRight, Info, RefreshCw } from "lucide-react";
 import { LuxCard } from "@/components/ui/lux-card";
@@ -12,6 +18,7 @@ import { useMarkets, useQuote, useWalletBalances } from "@/hooks/use-oraculum-da
 import { useTokenOptions } from "@/hooks/use-token-options";
 import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { PERMIT2_ADDRESS, ROBINHOOD_CHAIN_ID } from "@/lib/constants";
 import { useOraculumStore } from "@/store/oraculum-store";
 
 type TokenChoice = {
@@ -20,14 +27,19 @@ type TokenChoice = {
   name: string;
   decimals: number;
   balanceUi?: number;
+  balanceRaw?: string;
   priceUsd?: number | null;
 };
 
 export function SwapCard() {
   const { address: walletAddress, isConnected } = useAccount();
-  const { data: hash, sendTransaction, isPending } = useSendTransaction();
+  const publicClient = usePublicClient();
+  const { sendTransactionAsync, isPending } = useSendTransaction();
+  const { signTypedDataAsync } = useSignTypedData();
+  const [hash, setHash] = useState<`0x${string}`>();
   const { data: receipt, isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const swapInputAddress = useOraculumStore((state) => state.swapInputAddress);
   const swapOutputAddress = useOraculumStore((state) => state.swapOutputAddress);
@@ -64,6 +76,7 @@ export function SwapCard() {
         name: balance.name,
         decimals: balance.decimals,
         balanceUi: balance.amountUi,
+        balanceRaw: balance.amountRaw,
         priceUsd: balance.usdPrice,
         ...previous,
       });
@@ -118,7 +131,12 @@ export function SwapCard() {
         }
       : null;
 
-  const { data: quote, isLoading: quoteLoading, refetch } = useQuote(quoteRequest);
+  const {
+    data: quote,
+    error: quoteError,
+    isLoading: quoteLoading,
+    refetch,
+  } = useQuote(quoteRequest);
 
   const receiveAmount =
     quote && outputToken
@@ -197,84 +215,165 @@ export function SwapCard() {
       setError("Connect a wallet and enter a valid amount to request a live quote.");
       return;
     }
+    if (!publicClient) {
+      setError("Robinhood Chain client is unavailable.");
+      return;
+    }
 
-    try {
-      setError(null);
+    type SwapPayload = {
+      error?: string;
+      to?: string;
+      data?: string;
+      value?: string;
+      gas?: string;
+      approvalNeeded?: {
+        token: string;
+        spender: string;
+        kind: "erc20";
+      };
+      permit2SignatureNeeded?: {
+        token: string;
+        spender: string;
+        amount: string;
+        expiration: number;
+        nonce: number;
+        sigDeadline: string;
+      };
+    };
 
+    let permit2Permit:
+      | {
+          amount: string;
+          expiration: number;
+          nonce: number;
+          sigDeadline: string;
+          signature: string;
+        }
+      | undefined;
+
+    const requestSwap = async () => {
       const response = await fetch("/api/swap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(quoteRequest),
+        body: JSON.stringify({ ...quoteRequest, permit2Permit }),
       });
-      const payload = (await response.json()) as {
-        error?: string;
-        to?: string;
-        data?: string;
-        value?: string;
-        gas?: string;
-        approvalNeeded?: { token: string; spender: string };
-      };
+      const payload = (await response.json()) as SwapPayload;
       if (!response.ok || !payload.to || !payload.data) {
         throw new Error(payload.error ?? "Unable to build swap.");
       }
+      return payload;
+    };
 
-      // ── ERC-20 approval step (if needed) ──
-      if (payload.approvalNeeded) {
-        const approveData = encodeFunctionData({
-          abi: [
-            {
-              inputs: [
-                { name: "spender", type: "address" },
-                { name: "amount", type: "uint256" },
-              ],
-              name: "approve",
-              outputs: [{ name: "", type: "bool" }],
-              stateMutability: "nonpayable",
-              type: "function",
-            },
-          ] as const,
-          functionName: "approve",
-          args: [
-            payload.approvalNeeded.spender as `0x${string}`,
-            BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-          ],
-        });
+    try {
+      setError(null);
+      setHash(undefined);
+      setIsSubmitting(true);
 
-        await sendTransaction({
-          to: payload.approvalNeeded.token as `0x${string}`,
-          data: approveData,
-        });
+      const completedApprovals = new Set<string>();
 
-        // Re-fetch swap data after approval (allowance should now be sufficient)
-        const swapResponse = await fetch("/api/swap", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(quoteRequest),
-        });
-        const swapPayload = (await swapResponse.json()) as typeof payload;
-        if (!swapResponse.ok || !swapPayload.to || !swapPayload.data) {
-          throw new Error(swapPayload.error ?? "Unable to build swap after approval.");
+      for (let step = 0; step < 10; step += 1) {
+        const payload = await requestSwap();
+
+        if (payload.approvalNeeded) {
+          const approval = payload.approvalNeeded;
+          const approvalKey =
+            `${approval.kind}:${approval.token}:${approval.spender}`.toLowerCase();
+
+          // The browser wallet and the server can briefly read different RPC heads after an
+          // approval is mined. Do not ask the user to approve the same allowance twice; wait
+          // for the server RPC to observe the receipt and rebuild the final swap instead.
+          if (completedApprovals.has(approvalKey)) {
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+            continue;
+          }
+
+          const approvalTarget = approval.token as `0x${string}`;
+          const approvalData = encodeFunctionData({
+            abi: [
+              {
+                inputs: [
+                  { name: "spender", type: "address" },
+                  { name: "amount", type: "uint256" },
+                ],
+                name: "approve",
+                outputs: [{ name: "", type: "bool" }],
+                stateMutability: "nonpayable",
+                type: "function",
+              },
+            ] as const,
+            functionName: "approve",
+            args: [approval.spender as `0x${string}`, 2n ** 256n - 1n],
+          });
+          const approvalHash = await sendTransactionAsync({
+            to: approvalTarget,
+            data: approvalData,
+          });
+          const approvalReceipt = await publicClient.waitForTransactionReceipt({
+            hash: approvalHash,
+          });
+          if (approvalReceipt.status !== "success") {
+            throw new Error("Token approval failed on Robinhood Chain.");
+          }
+          completedApprovals.add(approvalKey);
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          continue;
         }
 
-        await sendTransaction({
-          to: swapPayload.to as `0x${string}`,
-          data: swapPayload.data as `0x${string}`,
-          value: swapPayload.value ? BigInt(swapPayload.value) : undefined,
-          gas: swapPayload.gas ? BigInt(swapPayload.gas) : undefined,
-        });
-      } else {
-        // No approval needed – execute swap directly
-        await sendTransaction({
+        if (payload.permit2SignatureNeeded) {
+          const permit = payload.permit2SignatureNeeded;
+          const signature = await signTypedDataAsync({
+            domain: {
+              name: "Permit2",
+              chainId: ROBINHOOD_CHAIN_ID,
+              verifyingContract: PERMIT2_ADDRESS as `0x${string}`,
+            },
+            types: {
+              PermitDetails: [
+                { name: "token", type: "address" },
+                { name: "amount", type: "uint160" },
+                { name: "expiration", type: "uint48" },
+                { name: "nonce", type: "uint48" },
+              ],
+              PermitSingle: [
+                { name: "details", type: "PermitDetails" },
+                { name: "spender", type: "address" },
+                { name: "sigDeadline", type: "uint256" },
+              ],
+            },
+            primaryType: "PermitSingle",
+            message: {
+              details: {
+                token: permit.token as `0x${string}`,
+                amount: BigInt(permit.amount),
+                expiration: permit.expiration,
+                nonce: permit.nonce,
+              },
+              spender: permit.spender as `0x${string}`,
+              sigDeadline: BigInt(permit.sigDeadline),
+            },
+          });
+          permit2Permit = { ...permit, signature };
+          continue;
+        }
+        const swapHash = await sendTransactionAsync({
           to: payload.to as `0x${string}`,
           data: payload.data as `0x${string}`,
           value: payload.value ? BigInt(payload.value) : undefined,
           gas: payload.gas ? BigInt(payload.gas) : undefined,
         });
+        setHash(swapHash);
+        return;
       }
+
+      throw new Error(
+        "Approvals succeeded, but the Robinhood RPC did not expose them in time. Try Swap again.",
+      );
     } catch (submissionError) {
       setError(
         submissionError instanceof Error ? submissionError.message : "Swap submission failed.",
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -304,7 +403,11 @@ export function SwapCard() {
           excludeAddress={swapOutputAddress}
           max
           onMax={() =>
-            setSwapAmount(inputToken?.balanceUi != null ? String(inputToken.balanceUi) : swapAmount)
+            setSwapAmount(
+              inputToken?.balanceRaw != null
+                ? formatUnits(BigInt(inputToken.balanceRaw), inputToken.decimals)
+                : swapAmount,
+            )
           }
         />
         <TokenLeg
@@ -410,9 +513,11 @@ export function SwapCard() {
       </div>
 
       {/* ── error / not-connected banner ── */}
-      {(error || !isConnected) && (
+      {(error || quoteError || !isConnected) && (
         <div className="border-t border-border/60 px-6 py-3 text-center text-sm text-muted-foreground">
-          {error ?? "Connect a wallet to trade."}
+          {error ??
+            (quoteError instanceof Error ? quoteError.message : null) ??
+            "Connect a wallet to trade."}
         </div>
       )}
 
@@ -421,7 +526,9 @@ export function SwapCard() {
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!quote || isPending || isConfirming || quoteLoading || !isConnected}
+          disabled={
+            !quote || isPending || isSubmitting || isConfirming || quoteLoading || !isConnected
+          }
           className={cn(
             "group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl py-3 text-xs uppercase tracking-[0.28em] text-black",
             "bg-primary",
@@ -434,7 +541,7 @@ export function SwapCard() {
             className="absolute inset-0 -translate-x-full skew-x-[-20deg] bg-white/20 transition-transform duration-700 group-hover:translate-x-full"
           />
           <span className="relative">
-            {isPending
+            {isPending || isSubmitting
               ? "Submitting swap"
               : isConfirming
                 ? "Confirming swap"
