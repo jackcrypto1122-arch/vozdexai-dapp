@@ -76,7 +76,14 @@ export const FEATURED_TOKENS = [
     feeTier: 10000,
     logoUri: "/cashcat.png",
   },
-  { address: HOODRAT_ADDRESS, symbol: "HOODRAT", name: "Hoodrat", decimals: 18, dexVersion: "v2", logoUri: "/hoodrat.png" },
+  {
+    address: HOODRAT_ADDRESS,
+    symbol: "HOODRAT",
+    name: "Hoodrat",
+    decimals: 18,
+    dexVersion: "v2",
+    logoUri: "/hoodrat.png",
+  },
   {
     address: JUGGERNAUT_ADDRESS,
     symbol: "JUGGERNAUT",
