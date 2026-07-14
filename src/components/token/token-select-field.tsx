@@ -48,7 +48,11 @@ export function TokenSelectField({
       >
         <span className="flex items-center gap-2 truncate">
           {currentToken?.logoUri && (
-            <img src={currentToken.logoUri} alt={currentToken.name} className="h-5 w-5 rounded-full" />
+            <img
+              src={currentToken.logoUri}
+              alt={currentToken.name}
+              className="h-5 w-5 rounded-full"
+            />
           )}
           {currentToken ? `${currentToken.symbol} · ${currentToken.name}` : "Select Token"}
         </span>
@@ -73,11 +77,7 @@ export function TokenSelectField({
               >
                 <div className="flex items-center gap-3">
                   {token.logoUri && (
-                    <img
-                      src={token.logoUri}
-                      alt={token.name}
-                      className="h-7 w-7 rounded-full"
-                    />
+                    <img src={token.logoUri} alt={token.name} className="h-7 w-7 rounded-full" />
                   )}
                   <div className="flex flex-col">
                     <span className="font-semibold text-foreground transition-colors group-hover:text-primary">
