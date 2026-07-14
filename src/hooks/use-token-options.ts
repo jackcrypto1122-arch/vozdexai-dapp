@@ -13,6 +13,7 @@ function dedupeTokens(tokens: TokenInfo[]) {
     byAddress.set(token.address.toLowerCase(), {
       ...(existing || {}),
       ...token,
+      address: existing?.address || token.address,
       logoUri: existing?.logoUri || token.logoUri,
     });
   }
