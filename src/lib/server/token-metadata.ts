@@ -252,33 +252,27 @@ export async function resolveTokenMetadata(
     return cached;
   }
 
-  if (!isAddress(requestedAddress)) {
+  const normalizedAddress = normalizeTokenAddress(requestedAddress);
+  const resolvedFromPool = normalizedAddress.toLowerCase() !== requestedAddress.toLowerCase();
+
+  if (!isAddress(requestedAddress) && !isAddress(normalizedAddress)) {
     throw new Error("Enter a valid EVM contract address.");
   }
 
-  const featuredToken = FEATURED_TOKENS.find(
-    (token) => token.address.toLowerCase() === requestedAddress.toLowerCase(),
-  );
+  const featuredToken = FEATURED_TOKENS.find((token) => {
+    const tokenAddress = token.address.toLowerCase();
+    return (
+      tokenAddress === requestedAddress.toLowerCase() ||
+      tokenAddress === normalizedAddress.toLowerCase()
+    );
+  });
   if (featuredToken) {
-    const payload = toMetadataResponse(requestedAddress, featuredToken, false);
-    cacheMetadata([requestedAddress, featuredToken.address], payload);
+    const payload = toMetadataResponse(requestedAddress, featuredToken, resolvedFromPool);
+    cacheMetadata([requestedAddress, normalizedAddress, featuredToken.address], payload);
     return payload;
   }
 
-  const normalizedAddress = normalizeTokenAddress(requestedAddress);
-  if (normalizedAddress.toLowerCase() !== requestedAddress.toLowerCase()) {
-    const normalizedFeaturedToken = FEATURED_TOKENS.find(
-      (token) => token.address.toLowerCase() === normalizedAddress.toLowerCase(),
-    );
-    if (normalizedFeaturedToken) {
-      const payload = toMetadataResponse(requestedAddress, normalizedFeaturedToken, true);
-      cacheMetadata(
-        [requestedAddress, normalizedAddress, normalizedFeaturedToken.address],
-        payload,
-      );
-      return payload;
-    }
-
+  if (resolvedFromPool) {
     const token =
       (await tryReadErc20Metadata(normalizedAddress)) ??
       (await tryReadExplorerMetadata(normalizedAddress));

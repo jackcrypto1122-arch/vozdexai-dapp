@@ -60,7 +60,7 @@ export function TokenSelectField({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-64 max-h-96 overflow-y-auto rounded-xl border border-border/70 bg-card p-1 shadow-lg ring-1 ring-black/5">
+        <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-64 max-h-60 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-card p-1 shadow-lg ring-1 ring-black/5">
           {options
             .filter(
               (t) => !excludeAddress || t.address.toLowerCase() !== excludeAddress.toLowerCase(),

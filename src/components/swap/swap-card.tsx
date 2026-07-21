@@ -18,7 +18,7 @@ import { useMarkets, useQuote, useWalletBalances } from "@/hooks/use-oraculum-da
 import { useTokenOptions } from "@/hooks/use-token-options";
 import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { PERMIT2_ADDRESS, ROBINHOOD_CHAIN_ID } from "@/lib/constants";
+import { PERMIT2_ADDRESS, ROBINHOOD_CHAIN_ID, STOCK_TOKEN_ADDRESSES } from "@/lib/constants";
 import { useOraculumStore } from "@/store/oraculum-store";
 
 type TokenChoice = {
@@ -31,6 +31,8 @@ type TokenChoice = {
   priceUsd?: number | null;
   logoUri?: string;
 };
+
+type SwapMarket = "crypto" | "stocks";
 
 function isBalanceAmount(value: string) {
   return value.trim().toLowerCase() === "max";
@@ -77,6 +79,7 @@ export function SwapCard() {
   const { data: receipt, isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [swapMarket, setSwapMarket] = useState<SwapMarket>("crypto");
 
   const swapInputAddress = useOraculumStore((state) => state.swapInputAddress);
   const swapOutputAddress = useOraculumStore((state) => state.swapOutputAddress);
@@ -100,6 +103,10 @@ export function SwapCard() {
   const { data: marketPayload } = useMarkets();
   const markets = useMemo(() => marketPayload?.markets ?? [], [marketPayload?.markets]);
   const tokenOptions = useTokenOptions();
+  const stockTokenAddressSet = useMemo(
+    () => new Set(STOCK_TOKEN_ADDRESSES.map((address) => address.toLowerCase())),
+    [],
+  );
 
   const tokens = useMemo<TokenChoice[]>(() => {
     const byAddress = new Map<string, TokenChoice>();
@@ -147,6 +154,7 @@ export function SwapCard() {
   const isEthLike = (addr: string) =>
     addr.toLowerCase() === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
     addr.toLowerCase() === "0x0bd7d308f8e1639fab988df18a8011f41eacad73";
+  const isStockToken = (addr: string) => stockTokenAddressSet.has(addr.toLowerCase());
 
   const inputIsEth = isEthLike(swapInputAddress);
   const outputIsEth = isEthLike(swapOutputAddress);
@@ -158,16 +166,63 @@ export function SwapCard() {
     }
   }, [inputIsEth, outputIsEth, swapInputAddress, setSwapPair]);
 
+  const filteredTokenOptions = useMemo(
+    () =>
+      tokenOptions.filter((token) =>
+        isEthLike(token.address)
+          ? true
+          : swapMarket === "stocks"
+            ? isStockToken(token.address)
+            : !isStockToken(token.address),
+      ),
+    [swapMarket, tokenOptions, stockTokenAddressSet],
+  );
+
+  const filteredNonEthTokenOptions = useMemo(
+    () => filteredTokenOptions.filter((token) => !isEthLike(token.address)),
+    [filteredTokenOptions],
+  );
+
+  useEffect(() => {
+    if (!filteredNonEthTokenOptions.length) {
+      return;
+    }
+
+    const activeNonEthAddress = inputIsEth ? swapOutputAddress : swapInputAddress;
+    const activeNonEthIsAllowed = filteredNonEthTokenOptions.some(
+      (token) => token.address.toLowerCase() === activeNonEthAddress.toLowerCase(),
+    );
+
+    if (isEthLike(activeNonEthAddress) || activeNonEthIsAllowed) {
+      return;
+    }
+
+    const fallbackAddress = filteredNonEthTokenOptions[0].address;
+    if (inputIsEth) {
+      setSwapPair(swapInputAddress, fallbackAddress);
+      return;
+    }
+
+    setSwapPair(fallbackAddress, swapOutputAddress);
+  }, [
+    filteredNonEthTokenOptions,
+    inputIsEth,
+    setSwapPair,
+    swapInputAddress,
+    swapOutputAddress,
+    swapMarket,
+  ]);
+
   // Filter tokens for each dropdown: the OTHER side must be ETH
-  const inputTokenOptions = tokenOptions; // user can pick anything on input side
+  const inputTokenOptions = filteredTokenOptions;
   const outputTokenOptions = useMemo(() => {
     if (inputIsEth) {
       // Input is ETH → output shows only non-ETH tokens
-      return tokenOptions.filter((t) => !isEthLike(t.address));
+      return filteredTokenOptions.filter((t) => !isEthLike(t.address));
     }
     // Input is a token → output locked to ETH only
-    return tokenOptions.filter((t) => isEthLike(t.address));
-  }, [tokenOptions, inputIsEth]);
+    return filteredTokenOptions.filter((t) => isEthLike(t.address));
+  }, [filteredTokenOptions, inputIsEth]);
 
   const resolvedSwapAmount = useMemo(() => {
     if (!isBalanceAmount(swapAmount) || inputToken?.balanceRaw == null) {
@@ -556,6 +611,29 @@ export function SwapCard() {
 
   return (
     <LuxCard className="overflow-visible">
+      <div className="border-b border-border/60 px-4 py-3 sm:px-5">
+        <div className="inline-flex rounded-xl border border-border/70 bg-background/50 p-1">
+          {(["crypto", "stocks"] as const).map((option) => {
+            const active = swapMarket === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setSwapMarket(option)}
+                className={cn(
+                  "rounded-lg px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.24em] transition-colors",
+                  active
+                    ? "bg-primary text-black shadow-[0_10px_30px_-12px_rgba(200,255,0,0.7)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option === "crypto" ? "Crypto" : "Stocks"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* ── token panels ── */}
       <div className="grid gap-px bg-border/60 md:grid-cols-2">
         <TokenLeg

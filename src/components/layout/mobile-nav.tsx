@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 export function MobileNav() {
   const pathname = usePathname();
-  const items = navItems.slice(0, 5);
+  const items = navItems.slice(0, 6);
   return (
     <nav className="lg:hidden fixed bottom-3 inset-x-3 z-40 rounded-2xl border border-sidebar-border bg-sidebar/95 backdrop-blur px-2 py-2 shadow-2xl">
       <div className="mb-2 flex items-center justify-center gap-2 rounded-xl border border-border/50 bg-background/40 px-3 py-2">
@@ -17,7 +17,7 @@ export function MobileNav() {
           Vozdex AI
         </span>
       </div>
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-6">
         {items.map((item) => {
           const active = pathname === item.to;
           const Icon = item.icon;

@@ -26,7 +26,7 @@ import { LuxCard } from "@/components/ui/lux-card";
 import { useTokenOptions } from "@/hooks/use-token-options";
 import { useHistory, useMarkets, usePortfolio } from "@/hooks/use-oraculum-data";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
-import { FEATURED_TOKENS, SYMBOL_TO_ADDRESS } from "@/lib/constants";
+import { FEATURED_TOKENS, STOCK_TOKEN_ADDRESSES, SYMBOL_TO_ADDRESS } from "@/lib/constants";
 import { formatAmount, formatPercent, formatTime, formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useOraculumStore } from "@/store/oraculum-store";
@@ -232,7 +232,15 @@ export function PortfolioRoutePage() {
 
 export function MarketsRoutePage() {
   const { data, isLoading, isError } = useMarkets();
-  const markets = useMemo(() => data?.markets ?? [], [data?.markets]);
+  const stockAddressSet = useMemo(
+    () => new Set(STOCK_TOKEN_ADDRESSES.map((address) => address.toLowerCase())),
+    [],
+  );
+  const markets = useMemo(
+    () =>
+      (data?.markets ?? []).filter((market) => !stockAddressSet.has(market.address.toLowerCase())),
+    [data?.markets, stockAddressSet],
+  );
   const gainers = useMemo(
     () => [...markets].sort((a, b) => (b.change24hPct ?? -999) - (a.change24hPct ?? -999)),
     [markets],
@@ -246,16 +254,16 @@ export function MarketsRoutePage() {
     <AppShell>
       <PageHeader
         eyebrow="Ecosystem"
-        title="Markets"
-        subtitle="Featured Robinhood Chain tokens with live prices, liquidity, and volume snapshots curated inside Vozdex AI."
+        title="Crypto Market"
+        subtitle="Featured Robinhood Chain crypto tokens with live prices, liquidity, and volume snapshots curated inside Vozdex AI."
       />
 
       <StatGrid
         items={[
           {
             k: "Tracked assets",
-            v: String(markets.length || FEATURED_TOKENS.length),
-            d: "Featured tokens",
+            v: String(markets.length || FEATURED_TOKENS.length - STOCK_TOKEN_ADDRESSES.length),
+            d: "Crypto tokens",
           },
           {
             k: "Top gainer",
@@ -271,7 +279,101 @@ export function MarketsRoutePage() {
       />
 
       <div className="mt-6">
-        <Panel eyebrow="Price board" title="Featured tokens">
+        <Panel eyebrow="Price board" title="Crypto tokens">
+          <DataState isLoading={isLoading} isError={isError} empty={!markets.length}>
+            <ul className="divide-y divide-border/60">
+              {markets.map((row) => (
+                <li
+                  key={row.address}
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 py-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-foreground">{row.symbol}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">{row.name}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="tabular-nums text-foreground">{formatUsd(row.priceUsd)}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Vol {formatUsd(row.volume24hUsd)}
+                    </p>
+                  </div>
+                  <span
+                    className={cn(
+                      "tabular-nums",
+                      (row.change24hPct ?? 0) >= 0 ? "text-primary" : "text-destructive",
+                    )}
+                  >
+                    {formatPercent(row.change24hPct)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </DataState>
+        </Panel>
+      </div>
+    </AppShell>
+  );
+}
+
+export function StockMarketsRoutePage() {
+  const { data, isLoading, isError } = useMarkets();
+  const stockAddressOrder = useMemo(
+    () =>
+      new Map(
+        STOCK_TOKEN_ADDRESSES.map((address, index) => [address.toLowerCase(), index] as const),
+      ),
+    [],
+  );
+  const markets = useMemo(
+    () =>
+      (data?.markets ?? [])
+        .filter((market) => stockAddressOrder.has(market.address.toLowerCase()))
+        .sort(
+          (left, right) =>
+            (stockAddressOrder.get(left.address.toLowerCase()) ?? Number.MAX_SAFE_INTEGER) -
+            (stockAddressOrder.get(right.address.toLowerCase()) ?? Number.MAX_SAFE_INTEGER),
+        ),
+    [data?.markets, stockAddressOrder],
+  );
+  const gainers = useMemo(
+    () => [...markets].sort((a, b) => (b.change24hPct ?? -999) - (a.change24hPct ?? -999)),
+    [markets],
+  );
+  const losers = useMemo(
+    () => [...markets].sort((a, b) => (a.change24hPct ?? 999) - (b.change24hPct ?? 999)),
+    [markets],
+  );
+
+  return (
+    <AppShell>
+      <PageHeader
+        eyebrow="Ecosystem"
+        title="Stock Market"
+        subtitle="Featured Robinhood Chain stock tokens for AAPL, AMD, AMZN, COIN, CRWV, GOOGL, INTC, META, MSFT, MU, NVDA, ORCL, PLTR, SNDK, TSLA, and USAR."
+      />
+
+      <StatGrid
+        items={[
+          {
+            k: "Tracked assets",
+            v: String(markets.length || STOCK_TOKEN_ADDRESSES.length),
+            d: "Stock tokens",
+          },
+          {
+            k: "Top gainer",
+            v: gainers[0]?.symbol ?? "N/A",
+            d: formatPercent(gainers[0]?.change24hPct),
+          },
+          {
+            k: "Top loser",
+            v: losers[0]?.symbol ?? "N/A",
+            d: formatPercent(losers[0]?.change24hPct),
+          },
+        ]}
+      />
+
+      <div className="mt-6">
+        <Panel eyebrow="Price board" title="Stock tokens">
           <DataState isLoading={isLoading} isError={isError} empty={!markets.length}>
             <ul className="divide-y divide-border/60">
               {markets.map((row) => (
